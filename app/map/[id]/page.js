@@ -84,7 +84,7 @@ export default function PublicMapPage() {
           initialScale={1}
           minScale={0.5}
           maxScale={5}
-          wheel={{ step: 0.05 }}
+          wheel={{ step: 0.01 }}
           doubleClick={{ disabled: true }}
         >
           {({ zoomIn, zoomOut, resetTransform }) => (
