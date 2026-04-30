@@ -7,29 +7,29 @@ export async function GET() {
     const session = await getServerSession(authOptions);
 
     if (!session) {
-      return Response.json({ maps: [] });
+      return Response.json({ groups: [] });
     }
 
     const client = await clientPromise;
     const db = client.db(process.env.MONGODB_DB);
 
-    const maps = await db
-      .collection("maps")
+    const groups = await db
+      .collection("groups")
       .find({ ownerEmail: session.user.email })
       .sort({ createdAt: -1 })
       .toArray();
 
-    const mapsFormatted = maps.map((map) => ({
-      ...map,
-      _id: map._id.toString(),
-    }));
-
-    return Response.json({ maps: mapsFormatted });
+    return Response.json({
+      groups: groups.map((group) => ({
+        ...group,
+        _id: group._id.toString(),
+      })),
+    });
   } catch (error) {
-    console.error("ERRO GET /api/maps:", error);
+    console.error("ERRO GET /api/groups:", error);
 
     return Response.json(
-      { error: error.message || "Erro ao buscar mapas." },
+      { error: "Erro ao buscar grupos." },
       { status: 500 }
     );
   }
@@ -41,16 +41,22 @@ export async function POST(request) {
 
     if (!session) {
       return Response.json(
-        { error: "Você precisa estar logado para criar mapas." },
+        { error: "Você precisa estar logado." },
         { status: 401 }
       );
     }
 
     const body = await request.json();
 
-    const newMap = {
-      title: body.title,
-      imageUrl: body.imageUrl,
+    if (!body.name?.trim()) {
+      return Response.json(
+        { error: "Nome do grupo obrigatório." },
+        { status: 400 }
+      );
+    }
+
+    const newGroup = {
+      name: body.name.trim(),
       ownerEmail: session.user.email,
       ownerName: session.user.name,
       createdAt: new Date(),
@@ -59,19 +65,19 @@ export async function POST(request) {
     const client = await clientPromise;
     const db = client.db(process.env.MONGODB_DB);
 
-    const result = await db.collection("maps").insertOne(newMap);
+    const result = await db.collection("groups").insertOne(newGroup);
 
     return Response.json({
-      map: {
-        ...newMap,
+      group: {
+        ...newGroup,
         _id: result.insertedId.toString(),
       },
     });
   } catch (error) {
-    console.error("ERRO POST /api/maps:", error);
+    console.error("ERRO POST /api/groups:", error);
 
     return Response.json(
-      { error: error.message || "Erro ao criar mapa." },
+      { error: "Erro ao criar grupo." },
       { status: 500 }
     );
   }

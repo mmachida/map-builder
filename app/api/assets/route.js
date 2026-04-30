@@ -7,29 +7,32 @@ export async function GET() {
     const session = await getServerSession(authOptions);
 
     if (!session) {
-      return Response.json({ maps: [] });
+      return Response.json({ assets: [] });
     }
 
     const client = await clientPromise;
     const db = client.db(process.env.MONGODB_DB);
 
-    const maps = await db
-      .collection("maps")
-      .find({ ownerEmail: session.user.email })
+    const assets = await db
+      .collection("assets")
+      .find({
+        ownerEmail: session.user.email,
+      })
       .sort({ createdAt: -1 })
       .toArray();
 
-    const mapsFormatted = maps.map((map) => ({
-      ...map,
-      _id: map._id.toString(),
-    }));
-
-    return Response.json({ maps: mapsFormatted });
+    return Response.json({
+      assets: assets.map((asset) => ({
+        ...asset,
+        _id: asset._id.toString(),
+        linkedGroupIds: asset.linkedGroupIds || [],
+      })),
+    });
   } catch (error) {
-    console.error("ERRO GET /api/maps:", error);
+    console.error("ERRO GET /api/assets:", error);
 
     return Response.json(
-      { error: error.message || "Erro ao buscar mapas." },
+      { error: "Erro ao buscar ícones." },
       { status: 500 }
     );
   }
@@ -41,37 +44,47 @@ export async function POST(request) {
 
     if (!session) {
       return Response.json(
-        { error: "Você precisa estar logado para criar mapas." },
+        { error: "Você precisa estar logado." },
         { status: 401 }
       );
     }
 
     const body = await request.json();
 
-    const newMap = {
-      title: body.title,
-      imageUrl: body.imageUrl,
+    if (!body.name?.trim()) {
+      return Response.json({ error: "Nome obrigatório." }, { status: 400 });
+    }
+
+    if (!body.imageUrl) {
+      return Response.json({ error: "Imagem obrigatória." }, { status: 400 });
+    }
+
+    const newAsset = {
       ownerEmail: session.user.email,
       ownerName: session.user.name,
+      name: body.name.trim(),
+      imageUrl: body.imageUrl,
+      type: "pin_icon",
+      linkedGroupIds: body.linkedGroupIds || [],
       createdAt: new Date(),
     };
 
     const client = await clientPromise;
     const db = client.db(process.env.MONGODB_DB);
 
-    const result = await db.collection("maps").insertOne(newMap);
+    const result = await db.collection("assets").insertOne(newAsset);
 
     return Response.json({
-      map: {
-        ...newMap,
+      asset: {
+        ...newAsset,
         _id: result.insertedId.toString(),
       },
     });
   } catch (error) {
-    console.error("ERRO POST /api/maps:", error);
+    console.error("ERRO POST /api/assets:", error);
 
     return Response.json(
-      { error: error.message || "Erro ao criar mapa." },
+      { error: "Erro ao criar ícone." },
       { status: 500 }
     );
   }
