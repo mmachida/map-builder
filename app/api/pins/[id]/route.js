@@ -9,13 +9,31 @@ export async function PATCH(request, context) {
     if (!ObjectId.isValid(id)) {
       return Response.json({ error: "ID inválido." }, { status: 400 });
     }
+	
+	function getIconKey(iconType, icon, iconImageUrl) {
+	  if (iconType === "custom") {
+		return `custom:${iconImageUrl}`;
+	  }
+	  return `emoji:${icon || "📍"}`;
+	}
 
-    const update = {
-      name: body.name,
-      description: body.description || "",
-      icon: body.icon || "📍",
-      updatedAt: new Date(),
-    };
+	const update = {
+	  name: body.name,
+	  typeName: body.typeName || body.name,
+	  description: body.description || "",
+
+	  icon: body.icon || "📍",
+	  iconType: body.iconType || "emoji",
+	  iconImageUrl: body.iconImageUrl || "",
+	  iconKey: getIconKey(
+		body.iconType || "emoji",
+		body.icon || "📍",
+		body.iconImageUrl || ""
+	  ),
+
+	  category: body.category || "geral",
+	  updatedAt: new Date(),
+	};
 
     const client = await clientPromise;
     const db = client.db(process.env.MONGODB_DB);

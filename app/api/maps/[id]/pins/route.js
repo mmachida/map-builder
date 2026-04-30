@@ -1,3 +1,4 @@
+import { ObjectId } from "mongodb";
 import clientPromise from "@/lib/mongodb";
 
 export async function GET(request, context) {
@@ -34,18 +35,50 @@ export async function POST(request, context) {
     const { id } = await context.params;
     const body = await request.json();
 
-    const newPin = {
-      mapId: id,
-      name: body.name,
-      description: body.description || "",
-      icon: body.icon || "📍",
-      x: body.x,
-      y: body.y,
-      createdAt: new Date(),
-    };
-
     const client = await clientPromise;
     const db = client.db(process.env.MONGODB_DB);
+
+    const map = await db.collection("maps").findOne({
+      _id: new ObjectId(id),
+    });
+
+    if (!map) {
+      return Response.json(
+        { error: "Mapa não encontrado." },
+        { status: 404 }
+      );
+    }
+	
+	function getIconKey(iconType, icon, iconImageUrl) {
+	  if (iconType === "custom") {
+		return `custom:${iconImageUrl}`;
+	  }
+	  return `emoji:${icon || "📍"}`;
+	}
+
+	const newPin = {
+	  mapId: id,
+	  groupId: map.groupId || "",
+	  ownerEmail: map.ownerEmail,
+
+	  name: body.name,
+	  typeName: body.typeName || body.name,
+	  description: body.description || "",
+
+	  icon: body.icon || "📍",
+	  iconType: body.iconType || "emoji",
+	  iconImageUrl: body.iconImageUrl || "",
+	  iconKey: getIconKey(
+		body.iconType || "emoji",
+		body.icon || "📍",
+		body.iconImageUrl || ""
+	  ),
+
+	  category: body.category || "geral",
+	  x: body.x,
+	  y: body.y,
+	  createdAt: new Date(),
+	};
 
     const result = await db.collection("pins").insertOne(newPin);
 
