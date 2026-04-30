@@ -113,17 +113,53 @@ button {
 .pin {
   position: absolute;
   transform: translate(-50%, -100%);
-  background: transparent;
-  font-size: 30px;
-  padding: 0;
+  width: 46px;
+  height: 46px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background: #0f1014;
+  border: 3px solid white;
+  border-radius: 50%;
+
   z-index: 10;
-  filter: drop-shadow(0 2px 3px black);
-  transition: transform 0.12s ease;
+
+  box-shadow:
+    0 0 0 2px rgba(0, 0, 0, 0.8),
+    0 6px 16px rgba(0, 0, 0, 0.75);
+
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  overflow: visible;
 }
 
 .pin:hover {
-  transform: translate(-50%, -100%) scale(1.2);
+  transform: translate(-50%, -100%) scale(1.12);
+  box-shadow:
+    0 0 0 3px rgba(59, 130, 246, 0.9),
+    0 8px 20px rgba(0, 0, 0, 0.85);
 }
+
+.pin::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  transform: translateX(-50%) rotate(45deg);
+
+  width: 12px;
+  height: 12px;
+
+  background: #0f1014;
+  border-right: 3px solid white;
+  border-bottom: 3px solid white;
+
+  box-shadow: 2px 2px 2px rgba(0, 0, 0, 0.6);
+
+  z-index: -1;
+}
+
 
 .popup {
   position: fixed;
@@ -431,4 +467,1064 @@ button {
 .authBox button {
   background: #ffffff;
   color: #111;
+}
+
+.modal select,
+.filterSelect {
+  background: #12121a;
+  color: white;
+  border: 1px solid #3a3a4d;
+  border-radius: 10px;
+  padding: 10px;
+  outline: none;
+}
+
+.filterSelect {
+  min-width: 160px;
+}
+
+.pinCategory {
+  margin-top: 10px;
+  color: #93c5fd;
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.assetGrid {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 14px;
+}
+
+.assetCard {
+  background: #12121a;
+  border: 1px solid #3a3a4d;
+  border-radius: 14px;
+  padding: 12px;
+  text-align: center;
+}
+
+.assetCard img {
+  width: 54px;
+  height: 54px;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto 10px;
+}
+
+.assetCard strong {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 10px;
+  color: #ddd;
+}
+
+.assetCard button {
+  background: #ef4444;
+  color: white;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+/* Emoji: maior e centralizado */
+.emojiPin {
+  font-size: 24px;
+  line-height: 1;
+}
+
+/* Custom: tem respiro interno */
+.customPin {
+  padding: 5px;
+}
+
+/* Imagem custom: nunca clipa */
+.customPinIcon {
+  width: 100%;
+  height: 100%;
+  max-width: 24px;
+  max-height: 24px;
+  object-fit: contain;
+  display: block;
+  pointer-events: none;
+}
+
+/* Popup continua maior */
+.popupIcon .customPinIcon {
+  width: 54px;
+  height: 54px;
+  max-width: 54px;
+  max-height: 54px;
+}
+
+.iconTypeToggle {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.iconTypeToggle button {
+  background: #12121a;
+  color: white;
+  border: 1px solid #3a3a4d;
+}
+
+.iconTypeToggle .selectedToggle {
+  background: #23314f;
+  border-color: #3b82f6;
+}
+
+.iconTypeToggle button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.customIconGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 9px;
+}
+
+.customIconOption {
+  background: #12121a;
+  color: white;
+  border: 1px solid #3a3a4d;
+  border-radius: 10px;
+  padding: 8px;
+  min-height: 86px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.customIconOption img {
+  width: 38px;
+  height: 38px;
+  object-fit: contain;
+  margin-bottom: 6px;
+}
+
+.customIconOption span {
+  font-size: 11px;
+  color: #ccc;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selectedCustomIcon {
+  border-color: #3b82f6;
+  background: #23314f;
+}
+
+.assetCard small {
+  display: block;
+  color: #999;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
+.assetCard button + button {
+  margin-top: 6px;
+}
+
+.assetPreview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #12121a;
+  border: 1px solid #3a3a4d;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 14px;
+}
+
+.assetPreview img {
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+}
+
+.groupChecklist {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 260px;
+  overflow-y: auto;
+  margin-top: 14px;
+}
+
+.groupCheckItem {
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+  background: #12121a;
+  border: 1px solid #3a3a4d;
+  border-radius: 10px;
+  padding: 10px;
+  margin: 0 !important;
+}
+
+.groupCheckItem input {
+  width: auto !important;
+  margin: 0 !important;
+}
+
+.routesLayer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 5;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.routeLine {
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.routePanel,
+.routesList {
+  position: fixed;
+  left: 24px;
+  bottom: 24px;
+  width: 280px;
+  background: #1f1f2a;
+  border: 1px solid #39394a;
+  border-radius: 14px;
+  padding: 16px;
+  z-index: 60;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.45);
+}
+
+.routesList {
+  bottom: 24px;
+  right: 24px;
+  left: auto;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.routePanel h3,
+.routesList h3 {
+  margin: 0 0 12px;
+}
+
+.routePanel input[type="text"],
+.routePanel input:not([type]) {
+  width: 100%;
+  background: #12121a;
+  color: white;
+  border: 1px solid #3a3a4d;
+  border-radius: 10px;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+.routePanel label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #ccc;
+  margin-bottom: 10px;
+}
+
+.routePanelActions {
+  display: flex;
+  gap: 8px;
+}
+
+.routePanelActions button,
+.routeItem button {
+  background: #3b82f6;
+  color: white;
+}
+
+.routePanelActions button:last-child,
+.routeItem button {
+  background: #ef4444;
+}
+
+.routeItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: #12121a;
+  border: 1px solid #3a3a4d;
+  border-radius: 10px;
+  padding: 10px;
+  margin-bottom: 8px;
+}
+
+.routeItem span {
+  color: #ddd;
+  font-size: 14px;
+}
+
+.routeHint {
+  font-size: 12px;
+  color: #aaa;
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+
+.imageWrapper.drawingRoute {
+  cursor: crosshair;
+}
+
+.routeLine {
+  pointer-events: stroke;
+  cursor: pointer;
+  transition:
+    stroke-width 0.12s ease,
+    opacity 0.12s ease;
+}
+
+.routeSidebar {
+  position: fixed;
+  right: 24px;
+  top: 110px;
+  width: 300px;
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+  background: #1f1f2a;
+  border: 1px solid #39394a;
+  border-radius: 14px;
+  padding: 14px;
+  z-index: 55;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.45);
+}
+
+.routeSidebar h3 {
+  margin: 0 0 12px;
+}
+
+.routeSidebarItem {
+  background: #12121a;
+  border: 1px solid #3a3a4d;
+  border-radius: 10px;
+  padding: 10px;
+  margin-bottom: 8px;
+}
+
+.routeSidebarItem.selected {
+  border-color: #3b82f6;
+  background: #23314f;
+}
+
+.routeNameButton {
+  width: 100%;
+  background: transparent;
+  color: white;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  margin-bottom: 8px;
+}
+
+.routeColorDot {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+}
+
+.routeNameButton span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.routeHiddenText {
+  color: #777;
+  text-decoration: line-through;
+}
+
+.routeSidebarActions {
+  display: flex;
+  gap: 8px;
+}
+
+.routeSidebarActions button {
+  flex: 1;
+  background: #3b82f6;
+  color: white;
+  font-size: 12px;
+  padding: 7px 8px;
+}
+
+.routeSidebarActions .danger {
+  background: #ef4444;
+}
+
+.routeSidebarActions button:only-child {
+  flex: 1;
+}
+
+.routeLine {
+  pointer-events: stroke;
+  cursor: pointer;
+  transition:
+    stroke-width 0.15s ease,
+    opacity 0.15s ease,
+    filter 0.15s ease;
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.9));
+}
+
+.routeLineActive {
+  filter:
+    drop-shadow(0 0 4px currentColor)
+    drop-shadow(0 0 10px currentColor)
+    drop-shadow(0 0 18px currentColor);
+  animation: routePulse 1.4s ease-in-out infinite;
+}
+
+@keyframes routePulse {
+  0% {
+    opacity: 0.85;
+  }
+
+  50% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0.85;
+  }
+}
+
+.routeLineActive {
+  stroke-dasharray: 8 6;
+  animation:
+    routePulse 1.4s ease-in-out infinite,
+    routeMarch 0.7s linear infinite;
+}
+
+@keyframes routeMarch {
+  from {
+    stroke-dashoffset: 0;
+  }
+
+  to {
+    stroke-dashoffset: -14;
+  }
+}
+
+.mapSidebar {
+  position: fixed;
+  top: 90px;
+  left: 0;
+  bottom: 0;
+  width: 360px;
+  background: #151218;
+  border-right: 1px solid #3a2f22;
+  z-index: 80;
+  padding: 18px;
+  overflow-y: auto;
+  overflow-x: visible;
+  box-shadow: 18px 0 40px rgba(0, 0, 0, 0.35);
+  transition: width 0.2s ease, padding 0.2s ease;
+}
+
+.mapSidebar.collapsed {
+  width: 0;
+  padding: 0;
+  overflow: visible;
+  border-right: none;
+}
+
+.sidebarCollapseButton {
+  position: fixed;
+  top: 110px;
+  left: 360px;
+  width: 28px;
+  height: 48px;
+  background: #151218;
+  color: white;
+  border-radius: 0 8px 8px 0;
+  border: 1px solid #3a2f22;
+  border-left: none;
+  z-index: 300;
+  font-size: 22px;
+  padding: 0;
+  transition: left 0.2s ease;
+}
+
+.mapSidebar.collapsed .sidebarCollapseButton {
+  left: 0;
+}
+
+.sidebarHeader {
+  text-align: center;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #4a3a26;
+  margin-bottom: 16px;
+}
+
+.sidebarHeader h2 {
+  margin: 0;
+  font-size: 22px;
+  color: #f5d18a;
+  letter-spacing: 1px;
+}
+
+.sidebarHeader p {
+  margin: 8px 0 0;
+  color: #d8b66b;
+  font-size: 13px;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+
+.sidebarActions {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  border-bottom: 1px solid #4a3a26;
+  padding-bottom: 14px;
+  margin-bottom: 18px;
+}
+
+.sidebarActions button {
+  background: transparent;
+  color: white;
+  text-transform: uppercase;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+.sidebarActions button:hover {
+  color: #f5d18a;
+}
+
+.sidebarSearch {
+  display: flex;
+  margin-bottom: 20px;
+}
+
+.sidebarSearch input {
+  width: 100%;
+  background: #0d0b0f;
+  border: 1px solid #b98b4a;
+  color: white;
+  padding: 10px 12px;
+  outline: none;
+}
+
+.sidebarSection {
+  margin-bottom: 22px;
+}
+
+.sidebarSection h3 {
+  margin: 0 0 10px;
+  color: #ddd;
+  font-size: 16px;
+  text-transform: uppercase;
+}
+
+.sidebarPlaceholder {
+  color: #777;
+  font-size: 13px;
+  border: 1px dashed #3a3a4d;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.sidebarCategoryList {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sidebarCategory {
+  border-bottom: 1px solid rgba(185, 139, 74, 0.35);
+  padding-bottom: 10px;
+}
+
+.sidebarCategoryHeader {
+  width: 100%;
+  background: transparent;
+  color: #ddd;
+  padding: 4px 0 8px;
+  display: flex;
+  justify-content: space-between;
+  text-transform: uppercase;
+  font-size: 14px;
+}
+
+.sidebarCategoryHeader:hover {
+  color: #f5d18a;
+}
+
+.sidebarTypeList {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 14px;
+}
+
+.sidebarTypeList.hidden {
+  display: none;
+}
+
+.sidebarTypeItem {
+  background: transparent;
+  color: #ccc;
+  padding: 3px 0;
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  font-size: 12px;
+}
+
+.sidebarTypeItem:hover {
+  color: white;
+}
+
+.sidebarTypeItem.hidden {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
+.sidebarTypeIcon {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebarTypeIcon img {
+  max-width: 18px;
+  max-height: 18px;
+  object-fit: contain;
+}
+
+.sidebarTypeItem strong,
+.sidebarCategoryHeader strong {
+  color: #aaa;
+  font-size: 12px;
+}
+
+.formRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 12px;
+}
+
+.formRow label {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  margin: 0;
+  gap: 8px;
+}
+
+.formRow input,
+.formRow select {
+  width: 100%;
+  height: 42px;
+  min-height: 42px;
+  box-sizing: border-box;
+
+  margin: 0;
+  padding: 0 12px;
+
+  background: #12121a;
+  color: white;
+  border: 1px solid #3a3a4d;
+  border-radius: 10px;
+
+  font: inherit;
+  line-height: 42px;
+}
+
+.formRow select {
+  line-height: normal;
+  padding-right: 32px;
+}
+
+.sidebarEditButton {
+  width: 100%;
+  margin-top: 10px;
+  margin-bottom: 16px;
+  padding: 8px;
+  background: #1f1b24;
+  border: 1px solid #3a2f22;
+  color: #f5d18a;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.sidebarEditButton:hover {
+  background: #2a2430;
+}
+
+.editableSidebarItem {
+  border: 1px dashed #f5d18a !important;
+  border-radius: 8px;
+  padding: 8px !important;
+  background: rgba(245, 209, 138, 0.08) !important;
+  cursor: pointer;
+}
+
+.editableSidebarItem:hover {
+  background: rgba(245, 209, 138, 0.16) !important;
+  color: #f5d18a;
+  transform: translateX(3px);
+}
+
+.modalActions .danger,
+button.danger {
+  background: #ef4444 !important;
+  color: white !important;
+}
+
+.modalActions .danger:hover,
+button.danger:hover {
+  background: #dc2626 !important;
+}
+
+.manageGroupsModal {
+  width: 520px;
+  max-height: 70vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.manageGroupsHeader {
+  display: block;
+  margin-bottom: 16px;
+}
+
+.manageGroupsHeader h2 {
+  margin: 0;
+}
+
+.manageGroupsHeader p {
+  margin: 6px 0 0;
+  color: #aaa;
+  font-size: 13px;
+}
+
+.manageGroupsHeader .closeButton {
+  position: static;
+  flex: 0 0 auto;
+}
+
+.manageGroupsList {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.manageGroupsList::-webkit-scrollbar {
+  width: 8px;
+}
+
+.manageGroupsList::-webkit-scrollbar-track {
+  background: #12121a;
+  border-radius: 999px;
+}
+
+.manageGroupsList::-webkit-scrollbar-thumb {
+  background: #3a3a4d;
+  border-radius: 999px;
+}
+
+.manageGroupsList::-webkit-scrollbar-thumb:hover {
+  background: #55556a;
+}
+
+.manageGroupBlock {
+  border: 1px solid #3a3a4d;
+  border-radius: 12px;
+  margin-bottom: 12px;
+  overflow: hidden;
+  background: #12121a;
+}
+
+.manageGroupHeader {
+  width: 100%;
+  background: #231a12;
+  color: #f5d18a;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 0;
+}
+
+.manageGroupHeader:hover {
+  background: #302318;
+}
+
+.manageCategoryList {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.manageCategoryItem {
+  width: 100%;
+  background: #1f1f2a;
+  color: white;
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+}
+
+.manageCategoryItem:hover {
+  background: #29314a;
+}
+
+.manageInlineActions {
+  padding: 10px;
+  background: #171722;
+  border-top: 1px solid #3a3a4d;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.manageInlineActionsNested {
+  margin-top: -4px;
+  margin-bottom: 8px;
+  border-radius: 0 0 10px 10px;
+  border: 1px solid #3a3a4d;
+  border-top: none;
+}
+
+.manageInlineActions input {
+  flex: 1;
+  background: #12121a;
+  color: white;
+  border: 1px solid #3a3a4d;
+  border-radius: 8px;
+  padding: 8px;
+  outline: none;
+}
+
+.manageInlineActions input:focus {
+  border-color: #3b82f6;
+}
+
+.manageInlineActions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.manageCreateBox {
+  background: #171722;
+  border: 1px solid #3a3a4d;
+  border-radius: 12px;
+  padding: 10px;
+  margin-bottom: 14px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.manageCreateBoxNested {
+  margin: 8px;
+  margin-top: 0;
+}
+
+.manageCreateBox input,
+.manageCreateBox select {
+  background: #12121a;
+  color: white;
+  border: 1px solid #3a3a4d;
+  border-radius: 8px;
+  padding: 8px;
+  outline: none;
+}
+
+.manageCreateBox input {
+  flex: 1;
+}
+
+.manageCreateBox input:focus,
+.manageCreateBox select:focus {
+  border-color: #3b82f6;
+}
+
+.manageAddCategoryRow {
+  padding: 8px;
+  border-bottom: 1px solid #2d2d3a;
+}
+
+.manageAddCategoryRow button {
+  width: 100%;
+}
+
+.iconPickerButton {
+  width: 48px;
+  height: 42px;
+  background: #12121a;
+  color: white;
+  border: 1px solid #3a3a4d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  font-size: 22px;
+}
+
+.iconPickerButton img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+
+.iconPickerModal {
+  width: 560px;
+  max-height: 80vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.iconPickerTabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.iconPickerTabs button {
+  flex: 1;
+  background: #12121a;
+  color: white;
+  border: 1px solid #3a3a4d;
+}
+
+.iconPickerTabs .selectedToggle {
+  background: #23314f;
+  border-color: #3b82f6;
+}
+
+.iconPickerGrid {
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 10px;
+  padding-right: 6px;
+}
+
+.iconPickerItem {
+  min-height: 72px;
+  background: #12121a;
+  color: white;
+  border: 1px solid #3a3a4d;
+  border-radius: 12px;
+  font-size: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.iconPickerItem.custom {
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.iconPickerItem.custom img {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}
+
+.iconPickerItem.custom span {
+  max-width: 100%;
+  color: #ccc;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iconPickerItem.selected {
+  border-color: #3b82f6;
+  background: #23314f;
+}
+
+.iconPickerItem.disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  filter: grayscale(1);
+}
+
+.pinFormGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.modal .pinFormField {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 0;
+}
+
+.modal .pinFormField select,
+.modal .pinFormField input {
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  .pinFormGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.manageHeaderTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.manageAddGroupButton {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.sidebarActionButton.activeHidden,
+.sidebarCategoryHeader.activeHidden {
+  opacity: 0.45;
+  text-decoration: line-through;
+  filter: grayscale(1);
+}
+
+.sidebarCategoryHeader.activeHidden span,
+.sidebarCategoryHeader.activeHidden strong {
+  text-decoration: line-through;
+}
+
+.iconButton {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
 }
