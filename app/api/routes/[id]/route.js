@@ -29,12 +29,20 @@ export async function PATCH(request, context) {
       update.name = body.name.trim();
     }
 
+    if (body.description !== undefined) {
+      update.description = body.description.trim();
+    }
+
     if (body.color !== undefined) {
       update.color = body.color;
     }
 
     if (body.width !== undefined) {
       update.width = Number(body.width);
+    }
+
+    if (body.sortOrder !== undefined) {
+      update.sortOrder = Number(body.sortOrder);
     }
 
     const client = await clientPromise;

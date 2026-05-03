@@ -1,5 +1,7 @@
 import { ObjectId } from "mongodb";
+import { getServerSession } from "next-auth";
 import clientPromise from "@/lib/mongodb";
+import { authOptions } from "@/lib/auth";
 
 export async function GET(request, context) {
   try {
@@ -33,6 +35,15 @@ export async function GET(request, context) {
 export async function POST(request, context) {
   try {
     const { id } = await context.params;
+    const session = await getServerSession(authOptions);
+
+    if (!session) {
+      return Response.json(
+        { error: "Você precisa estar logado." },
+        { status: 401 }
+      );
+    }
+
     const body = await request.json();
 
     const client = await clientPromise;
@@ -40,6 +51,7 @@ export async function POST(request, context) {
 
     const map = await db.collection("maps").findOne({
       _id: new ObjectId(id),
+      ownerEmail: session.user.email,
     });
 
     if (!map) {
@@ -101,12 +113,21 @@ export async function POST(request, context) {
 export async function DELETE(request, context) {
   try {
     const { id } = await context.params;
+    const session = await getServerSession(authOptions);
+
+    if (!session) {
+      return Response.json(
+        { error: "Você precisa estar logado." },
+        { status: 401 }
+      );
+    }
 
     const client = await clientPromise;
     const db = client.db(process.env.MONGODB_DB);
 
     const result = await db.collection("pins").deleteMany({
       mapId: id,
+      ownerEmail: session.user.email,
     });
 
     return Response.json({
