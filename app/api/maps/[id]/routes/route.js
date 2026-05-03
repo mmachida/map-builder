@@ -85,10 +85,12 @@ export async function POST(request, context) {
       ownerEmail: session.user.email,
       ownerName: session.user.name,
       name: body.name.trim(),
+      description: body.description?.trim() || "",
       points: body.points,
       color: body.color || "#3b82f6",
       width: body.width || 4,
       createdAt: new Date(),
+      updatedAt: new Date(),
     };
 
     const result = await db.collection("routes").insertOne(newRoute);

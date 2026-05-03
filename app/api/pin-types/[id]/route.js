@@ -44,10 +44,23 @@ export async function PATCH(request, context) {
     }
 
     const newTypeName = body.typeName.trim();
+
     const newCategory =
       typeof body.category === "string" && body.category.trim()
         ? body.category.trim()
         : pinType.category || "geral";
+
+    const newIconType = body.iconType || pinType.iconType || "emoji";
+    const newIcon = newIconType === "custom" ? "" : body.icon || pinType.icon || "📍";
+    const newIconImageUrl =
+      newIconType === "custom"
+        ? body.iconImageUrl || pinType.iconImageUrl || ""
+        : "";
+
+    const newIconKey =
+      newIconType === "custom"
+        ? `custom:${newIconImageUrl}`
+        : `emoji:${newIcon}`;
 
     await db.collection("pinTypes").updateOne(
       {
@@ -58,6 +71,10 @@ export async function PATCH(request, context) {
         $set: {
           typeName: newTypeName,
           category: newCategory,
+          icon: newIcon,
+          iconType: newIconType,
+          iconImageUrl: newIconImageUrl,
+          iconKey: newIconKey,
           updatedAt: new Date(),
         },
       }
@@ -80,7 +97,10 @@ export async function PATCH(request, context) {
         $set: {
           typeName: newTypeName,
           category: newCategory,
-          iconKey: pinType.iconKey,
+          icon: newIcon,
+          iconType: newIconType,
+          iconImageUrl: newIconImageUrl,
+          iconKey: newIconKey,
           updatedAt: new Date(),
         },
       }
@@ -92,6 +112,10 @@ export async function PATCH(request, context) {
         _id: pinType._id.toString(),
         typeName: newTypeName,
         category: newCategory,
+        icon: newIcon,
+        iconType: newIconType,
+        iconImageUrl: newIconImageUrl,
+        iconKey: newIconKey,
         updatedAt: new Date(),
       },
     });
