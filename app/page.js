@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { signIn, signOut, useSession } from "next-auth/react";
 import Link from "next/link";
 import "./page.css";
@@ -25,19 +25,7 @@ export default function Dashboard() {
   const [editingGroup, setEditingGroup] = useState(null);
   const [editingGroupName, setEditingGroupName] = useState("");
 
-  useEffect(() => {
-    if (status === "authenticated") {
-      loadDashboard();
-    }
-
-    if (status === "unauthenticated") {
-      setLoaded(true);
-      setGroups([]);
-      setAssets([]);
-    }
-  }, [status]);
-
-  async function loadDashboard() {
+  const loadDashboard = useCallback(async function loadDashboard() {
     try {
       const groupsResponse = await fetch("/api/groups");
       const groupsData = await groupsResponse.json();
@@ -64,7 +52,17 @@ export default function Dashboard() {
     } finally {
       setLoaded(true);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    if (status !== "authenticated") return;
+
+    const timeoutId = window.setTimeout(() => {
+      loadDashboard();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [status, loadDashboard]);
 
   async function createGroup() {
     if (!groupName.trim()) {
