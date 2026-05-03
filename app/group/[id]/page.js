@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import "../../page.css";
@@ -21,11 +21,7 @@ export default function GroupPage() {
 	const [editingMap, setEditingMap] = useState(null);
 	const [editingMapTitle, setEditingMapTitle] = useState("");
 
-  useEffect(() => {
-    loadGroup();
-  }, []);
-
-  async function loadGroup() {
+  const loadGroup = useCallback(async function loadGroup() {
     try {
       const mapsResponse = await fetch(`/api/groups/${groupId}/maps`);
       const mapsData = await mapsResponse.json();
@@ -51,7 +47,15 @@ export default function GroupPage() {
     } finally {
       setLoaded(true);
     }
-  }
+  }, [groupId]);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      loadGroup();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [loadGroup]);
 
   async function handleFile(event) {
     const file = event.target.files[0];

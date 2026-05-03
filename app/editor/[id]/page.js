@@ -1,10 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import "../../page.css";
+import { DEFAULT_ICONS } from "@/lib/constants/icons";
+import PinSidebarContent from "@/app/components/map/PinSidebarContent";
+import RouteSidebarContent from "@/app/components/map/RouteSidebarContent";
+import MapLanguageSelect from "@/app/components/map/MapLanguageSelect";
+import useMapLocale from "@/app/components/map/useMapLocale";
+import { MAP_ACCESS } from "@/lib/mapAccess";
 
 const CATEGORIES = [
   { value: "geral", label: "Geral" },
@@ -18,6 +24,7 @@ const CATEGORIES = [
 export default function EditorPage() {
   const params = useParams();
   const mapId = params.id;
+  const { locale, setLocale, t } = useMapLocale();
 
   const [mapData, setMapData] = useState(null);
   const [pins, setPins] = useState([]);
@@ -60,7 +67,30 @@ export default function EditorPage() {
   const [createCategoryIconImageUrl, setCreateCategoryIconImageUrl] = useState("");
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [iconPickerTab, setIconPickerTab] = useState("default");
+  const [contextMenu, setContextMenu] = useState(null);
 
+  const [routeDescription, setRouteDescription] = useState("");
+  const [routeMouseDownPoint, setRouteMouseDownPoint] = useState(null);
+
+  const [routeSidebarCollapsed, setRouteSidebarCollapsed] = useState(false);
+  const [routeSearch, setRouteSearch] = useState("");
+
+  const [mapMouseDownPoint, setMapMouseDownPoint] = useState(null);
+  const mapMouseDownPointRef = useRef(null);
+  const mapDragRef = useRef(false);
+
+  const [iconPickerMode, setIconPickerMode] = useState("create");
+  const [editingIconCategory, setEditingIconCategory] = useState(null);
+
+  const [activeManageUI, setActiveManageUI] = useState(null);
+
+  const [manageRoutesModalOpen, setManageRoutesModalOpen] = useState(false);
+  const [routeOrderDraft, setRouteOrderDraft] = useState([]);
+
+  const [movingPin, setMovingPin] = useState(null);
+  const [movingPinPosition, setMovingPinPosition] = useState(null);
+
+  const [confirmMovePinOpen, setConfirmMovePinOpen] = useState(false);
 
 
   const [form, setForm] = useState({
@@ -86,12 +116,37 @@ export default function EditorPage() {
   const [hoveredRouteId, setHoveredRouteId] = useState(null);
   const [hiddenRouteIds, setHiddenRouteIds] = useState([]);
 
+  const [pinPopupPosition, setPinPopupPosition] = useState(null);
+
+  const [activeUI, setActiveUI] = useState(null);
+
   const [routeEffectsEnabled, setRouteEffectsEnabled] = useState(() => {
     if (typeof window === "undefined") return true;
 
     const saved = localStorage.getItem("routeEffectsEnabled");
     return saved !== null ? JSON.parse(saved) : true;
   });
+
+  const orderedRoutes = [...routes].sort((a, b) => {
+    const orderA = typeof a.sortOrder === "number" ? a.sortOrder : 9999;
+    const orderB = typeof b.sortOrder === "number" ? b.sortOrder : 9999;
+
+    if (orderA !== orderB) return orderA - orderB;
+
+    return new Date(a.createdAt) - new Date(b.createdAt);
+  });
+
+  const filteredRoutes = orderedRoutes.filter((route) =>
+    route.name.toLowerCase().includes(routeSearch.toLowerCase())
+  );
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      centerMap();
+    }, 100);
+
+    return () => clearTimeout(timeout);
+  }, []);
 
   useEffect(() => {
     async function loadMapAndPins() {
@@ -231,16 +286,7 @@ export default function EditorPage() {
   }
 
   function handleMapClick(event) {
-    if (isDrawingRoute) {
-      const imageWrapper = event.currentTarget;
-      const rect = imageWrapper.getBoundingClientRect();
-
-      const x = ((event.clientX - rect.left) / rect.width) * 100;
-      const y = ((event.clientY - rect.top) / rect.height) * 100;
-
-      setRoutePoints((prev) => [...prev, { x, y }]);
-      return;
-    }
+    if (isDrawingRoute) return;
 
     if (!isAddingPin) return;
 
@@ -261,8 +307,21 @@ export default function EditorPage() {
 
   function handlePinClick(event, pin) {
     event.stopPropagation();
+
+    if (mapDragRef.current) return;
+
+    if (movingPin) return;
+
+    if (isDrawingRoute) return;
+
     setSelectedPin(pin);
     setSelectedRoute(null);
+    setIsEditingRoute(false);
+
+    setPinPopupPosition({
+      x: pin.x,
+      y: pin.y,
+    });
   }
 
   function openEditModal(pin) {
@@ -342,6 +401,12 @@ export default function EditorPage() {
           return;
         }
 
+        const selectedType = pinTypes.find(
+          (type) =>
+            type.typeName === finalTypeName &&
+            (type.category || "geral") === finalCategory
+        );
+
         const updatedPin = {
           ...editingPin,
           name: form.name.trim(),
@@ -350,6 +415,11 @@ export default function EditorPage() {
           icon: form.icon,
           iconType: form.iconType,
           iconImageUrl: form.iconImageUrl,
+          iconKey:
+            selectedType?.iconKey ||
+            (form.iconType === "custom"
+              ? `custom:${form.iconImageUrl || ""}`
+              : `emoji:${form.icon || "📍"}`),
           category: finalCategory,
         };
 
@@ -465,6 +535,12 @@ export default function EditorPage() {
   function handleRouteClick(event, route) {
     event.stopPropagation();
 
+    if (mapDragRef.current) return;
+
+    if (movingPin) return;
+
+    if (isDrawingRoute) return;
+
     setSelectedRoute(route);
     setSelectedPin(null);
 
@@ -485,6 +561,7 @@ export default function EditorPage() {
     setRouteColor("#3b82f6");
     setRouteWidth(4);
     setMousePoint(null);
+    setRouteDescription("");
   }
 
   function cancelRouteMode() {
@@ -513,6 +590,7 @@ export default function EditorPage() {
         },
         body: JSON.stringify({
           name: routeName.trim(),
+          description: routeDescription.trim(),
           points: routePoints,
           color: routeColor,
           width: routeWidth,
@@ -574,6 +652,7 @@ export default function EditorPage() {
         },
         body: JSON.stringify({
           name: editingRouteData.name.trim(),
+          description: editingRouteData.description?.trim() || "",
           color: editingRouteData.color,
           width: editingRouteData.width,
         }),
@@ -585,13 +664,13 @@ export default function EditorPage() {
         alert(data.error || "Erro ao atualizar rota.");
         return;
       }
-
       setRoutes((prev) =>
         prev.map((route) =>
           route._id === selectedRoute._id
             ? {
                 ...route,
                 name: editingRouteData.name.trim(),
+                description: editingRouteData.description?.trim() || "",
                 color: editingRouteData.color,
                 width: editingRouteData.width,
               }
@@ -618,7 +697,20 @@ export default function EditorPage() {
   }
 
   function handleMapMouseMove(event) {
-    if (!isDrawingRoute || routePoints.length === 0) return;
+    const dragPoint = mapMouseDownPointRef.current;
+
+    if (dragPoint) {
+      const distance = Math.hypot(
+        event.clientX - dragPoint.clientX,
+        event.clientY - dragPoint.clientY
+      );
+
+      if (distance > 4) {
+        mapDragRef.current = true;
+      }
+    }
+
+    if (!isDrawingRoute) return;
 
     const imageWrapper = event.currentTarget;
     const rect = imageWrapper.getBoundingClientRect();
@@ -638,11 +730,22 @@ export default function EditorPage() {
   }
 
   function selectRouteFromList(route) {
+    const isSame = selectedRoute?._id === route._id;
+
+    if (isSame) {
+      // 🔴 clicou na mesma → deseleciona
+      setSelectedRoute(null);
+      setIsEditingRoute(false);
+      return;
+    }
+
+    // 🟢 nova seleção
     setSelectedRoute(route);
     setSelectedPin(null);
 
     setEditingRouteData({
       name: route.name,
+      description: route.description || "",
       color: route.color || "#ef4444",
       width: route.width || 4,
     });
@@ -784,6 +887,7 @@ export default function EditorPage() {
     setCreateMode(null);
     setCreateValue("");
     setCreateCategoryIcon("📍");
+    setActiveManageUI(null);
   }
 
   async function renameGroup(group) {
@@ -914,19 +1018,30 @@ export default function EditorPage() {
   }
 
   async function deleteCategory(type) {
-    if (!type.pinTypeId) {
-      alert("Esta categoria ainda não tem ID editável.");
-      return;
-    }
+  console.log("Tentando deletar categoria:", type);
 
-    const confirmDelete = confirm("Deletar esta categoria e todos os pins dela?");
-    if (!confirmDelete) return;
+  if (!type.pinTypeId) {
+    alert("Esta categoria ainda não tem ID editável.");
+    return;
+  }
 
+  const confirmDelete = confirm("Deletar esta categoria e todos os pins dela?");
+  if (!confirmDelete) return;
+
+  try {
     const response = await fetch(`/api/pin-types/${type.pinTypeId}`, {
       method: "DELETE",
     });
 
-    const data = await response.json();
+    let data = {};
+
+    try {
+      data = await response.json();
+    } catch {
+      data = {};
+    }
+
+    console.log("Resposta delete categoria:", response.status, data);
 
     if (!response.ok) {
       alert(data.error || "Erro ao deletar categoria.");
@@ -937,13 +1052,22 @@ export default function EditorPage() {
       prev.filter((pinType) => pinType._id !== type.pinTypeId)
     );
 
-    setPins((prev) => prev.filter((pin) => getPinIconKey(pin) !== type.iconKey));
+    setPins((prev) =>
+      prev.filter((pin) => getPinIconKey(pin) !== type.iconKey)
+    );
+
     setHiddenPinTypes((prev) => prev.filter((key) => key !== type.key));
 
     setExpandedManageItem(null);
     setRenameMode(false);
     setRenameValue("");
+    setMoveMode(false);
+    setActiveManageUI(null);
+  } catch (error) {
+    console.error("ERRO FRONT DELETE CATEGORY:", error);
+    alert("Erro ao deletar categoria. Veja o console.");
   }
+}
 
   async function moveCategory(type) {
     if (!type.pinTypeId) {
@@ -1170,8 +1294,348 @@ export default function EditorPage() {
     }
   }
 
+  function openMapContextMenu(event) {
+    event.preventDefault();
+
+      if (movingPin) return;
+      if (isDrawingRoute) return;
+
+    const imageWrapper = event.currentTarget;
+    const rect = imageWrapper.getBoundingClientRect();
+
+    const x = ((event.clientX - rect.left) / rect.width) * 100;
+    const y = ((event.clientY - rect.top) / rect.height) * 100;
+
+    setContextMenu({
+      screenX: event.clientX,
+      screenY: event.clientY,
+      mapX: x,
+      mapY: y,
+    });
+  }
+
+  function closeContextMenu() {
+    setContextMenu(null);
+  }
+
+  function addPinFromContextMenu() {
+    const defaultForm = getDefaultPinForm();
+
+    setPendingPosition({
+      x: contextMenu.mapX,
+      y: contextMenu.mapY,
+    });
+
+    setEditingPin(null);
+    setForm(defaultForm);
+    setModalOpen(true);
+    setIsAddingPin(false);
+    setIsDrawingRoute(false);
+    closeContextMenu();
+  }
+
+  function addRouteFromContextMenu() {
+    setIsDrawingRoute(true);
+    setIsAddingPin(false);
+    setRoutePoints([]);
+
+    setRouteName("");
+    setRouteColor("#3b82f6");
+    setRouteWidth(4);
+    setMousePoint(null);
+    closeContextMenu();
+    setRouteDescription("");
+  }
+
+  function getMapPointFromEvent(event) {
+    const imageWrapper = event.currentTarget;
+    const rect = imageWrapper.getBoundingClientRect();
+
+    return {
+      x: ((event.clientX - rect.left) / rect.width) * 100,
+      y: ((event.clientY - rect.top) / rect.height) * 100,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    };
+  }
+
+  function handleMapMouseDown(event) {
+    const point = {
+      clientX: event.clientX,
+      clientY: event.clientY,
+    };
+
+    mapMouseDownPointRef.current = point;
+    mapDragRef.current = false;
+    setMapMouseDownPoint(point);
+
+    if (!isDrawingRoute || event.button !== 0) return;
+
+    setRouteMouseDownPoint(getMapPointFromEvent(event));
+  }
+
+  function handleMapMouseUp(event) {
+    if (
+      event.target.closest?.(".routeSnapHitbox") ||
+      event.target.closest?.(".routeSnapButton")
+    ) {
+      return;
+    }
+
+    if (!isDrawingRoute || event.button !== 0 || !routeMouseDownPoint) return;
+
+    const point = getMapPointFromEvent(event);
+
+    const distance = Math.hypot(
+      point.clientX - routeMouseDownPoint.clientX,
+      point.clientY - routeMouseDownPoint.clientY
+    );
+
+    setRouteMouseDownPoint(null);
+
+    if (distance > 4) return;
+
+    setRoutePoints((prev) => [
+      ...prev,
+      {
+        x: point.x,
+        y: point.y,
+      },
+    ]);
+  }
+
+  function centerMap() {
+    const wrapper = document.querySelector(".transformWrapper");
+    const content = document.querySelector(".imageWrapper");
+
+    if (!wrapper || !content) return;
+
+    const scale = 1;
+
+    const x = (wrapper.clientWidth - content.offsetWidth * scale) / 2;
+    const y = (wrapper.clientHeight - content.offsetHeight * scale) / 2;
+
+    setTransform(x, y, scale, 200);
+  }
+
+  function showAllRoutes() {
+    setHiddenRouteIds([]);
+  }
+
+  function hideAllRoutes() {
+    setHiddenRouteIds(routes.map((route) => route._id));
+  }
+
+  async function updateCategoryIcon(type, iconData) {
+    const iconKey =
+      iconData.iconType === "custom"
+        ? `custom:${iconData.iconImageUrl}`
+        : `emoji:${iconData.icon}`;
+
+    const iconAlreadyExists = pinTypes.some(
+      (pinType) =>
+        pinType.iconKey === iconKey &&
+        pinType._id !== type.pinTypeId
+    );
+
+    if (iconAlreadyExists) {
+      alert("Já existe uma categoria usando este ícone.");
+      return;
+    }
+
+    const response = await fetch(`/api/pin-types/${type.pinTypeId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        typeName: type.label,
+        category: type.category || "geral",
+        icon: iconData.icon || "",
+        iconType: iconData.iconType,
+        iconImageUrl: iconData.iconImageUrl || "",
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      alert(data.error || "Erro ao alterar ícone.");
+      return;
+    }
+
+    setPinTypes((prev) =>
+      prev.map((pinType) =>
+        pinType._id === type.pinTypeId
+          ? {
+              ...pinType,
+              icon: iconData.icon || "",
+              iconType: iconData.iconType,
+              iconImageUrl: iconData.iconImageUrl || "",
+              iconKey,
+            }
+          : pinType
+      )
+    );
+
+    setPins((prev) =>
+      prev.map((pin) =>
+        getPinIconKey(pin) === type.iconKey
+          ? {
+              ...pin,
+              icon: iconData.icon || "",
+              iconType: iconData.iconType,
+              iconImageUrl: iconData.iconImageUrl || "",
+              iconKey,
+            }
+          : pin
+      )
+    );
+
+    setIconPickerOpen(false);
+    setEditingIconCategory(null);
+    setIconPickerMode("create");
+  }
+
+  function openManageUI(key) {
+    setActiveManageUI((prev) => (prev === key ? null : key));
+
+    setRenameMode(false);
+    setMoveMode(false);
+    setExpandedManageItem(null);
+  }
+
+  function moveRoute(route, direction) {
+    const currentIndex = routeOrderDraft.findIndex(
+      (item) => item._id === route._id
+    );
+
+    if (currentIndex === -1) return;
+
+    const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+
+    if (targetIndex < 0 || targetIndex >= routeOrderDraft.length) return;
+
+    const reordered = [...routeOrderDraft];
+    const [removed] = reordered.splice(currentIndex, 1);
+    reordered.splice(targetIndex, 0, removed);
+
+    const finalRoutes = reordered.map((item, index) => ({
+      ...item,
+      sortOrder: index,
+    }));
+
+    setRouteOrderDraft(finalRoutes);
+  }
+
+  async function saveRouteOrder() {
+    try {
+      await Promise.all(
+        routeOrderDraft.map((route, index) =>
+          fetch(`/api/routes/${route._id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sortOrder: index }),
+          })
+        )
+      );
+
+      setRoutes(
+        routeOrderDraft.map((route, index) => ({
+          ...route,
+          sortOrder: index,
+        }))
+      );
+
+      setManageRoutesModalOpen(false);
+    } catch (error) {
+      console.error("ERRO AO SALVAR ORDEM DAS ROTAS:", error);
+      alert("Erro ao salvar ordem das rotas.");
+    }
+  }
+
+  function startMovePin(pin) {
+    setMovingPin(pin);
+    setMovingPinPosition({
+      x: pin.x,
+      y: pin.y,
+    });
+
+    setSelectedPin(null);
+    setSelectedRoute(null);
+    setIsEditingRoute(false);
+  }
+
+  function handleMovePinMouseMove(event) {
+    if (!movingPin) return;
+
+    const imageWrapper = event.currentTarget;
+    const rect = imageWrapper.getBoundingClientRect();
+
+    const x = ((event.clientX - rect.left) / rect.width) * 100;
+    const y = ((event.clientY - rect.top) / rect.height) * 100;
+
+    setMovingPinPosition({
+      x: Math.max(0, Math.min(100, x)),
+      y: Math.max(0, Math.min(100, y)),
+    });
+  }
+
+  async function finishMovePin(pinToMove = movingPin, positionToSave = movingPinPosition) {
+    if (!pinToMove || !positionToSave) return;
+
+    try {
+      const response = await fetch(`/api/pins/${pinToMove._id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: pinToMove.name,
+          typeName: pinToMove.typeName,
+          description: pinToMove.description || "",
+          icon: pinToMove.icon || "📍",
+          iconType: pinToMove.iconType || "emoji",
+          iconImageUrl: pinToMove.iconImageUrl || "",
+          iconKey: pinToMove.iconKey || getPinIconKey(pinToMove),
+          category: pinToMove.category || "geral",
+          x: positionToSave.x,
+          y: positionToSave.y,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        alert(data.error || "Erro ao mover pin.");
+        return;
+      }
+
+      setPins((prev) =>
+        prev.map((pin) =>
+          pin._id === pinToMove._id
+            ? {
+                ...pin,
+                x: positionToSave.x,
+                y: positionToSave.y,
+              }
+            : pin
+        )
+      );
+
+      setMovingPin(null);
+      setMovingPinPosition(null);
+    } catch (error) {
+      console.error(error);
+      alert("Erro ao mover pin.");
+    }
+  }
+
+  function cancelMovePin() {
+    setMovingPin(null);
+    setMovingPinPosition(null);
+  }
+
   return (
-    <main className="page">
+    <main className="page" onClick={closeContextMenu}>
 
       <aside className={sidebarCollapsed ? "mapSidebar collapsed" : "mapSidebar"}>
         <button
@@ -1182,6 +1646,34 @@ export default function EditorPage() {
         </button>
 
         {!sidebarCollapsed && (
+          <PinSidebarContent
+            title={mapData.title}
+            subtitle={t("map.interactiveMap")}
+            pinGroups={pinGroups}
+            hiddenPinTypes={hiddenPinTypes}
+            hideEmptyGroups={hideEmptyGroups}
+            search={sidebarSearch}
+            canManage={MAP_ACCESS.editor.canManagePinGroups}
+            manageDisabled={!!movingPin}
+            emptyText={t("pin.empty")}
+            labels={{
+              showAll: t("actions.showAll"),
+              hideAll: t("actions.hideAll"),
+              hideEmpty: t("actions.hideEmpty"),
+              search: t("common.search"),
+              manage: t("actions.managePinGroups"),
+            }}
+            onSearchChange={setSidebarSearch}
+            onShowAll={showAllPins}
+            onHideAll={hideAllPins}
+            onToggleHideEmpty={() => setHideEmptyGroups((prev) => !prev)}
+            onManage={() => setManageGroupsModalOpen(true)}
+            onToggleCategoryVisibility={toggleCategoryVisibility}
+            onTogglePinTypeVisibility={togglePinTypeVisibility}
+          />
+        )}
+
+        {false && !sidebarCollapsed && (
           <>
             <div className="sidebarHeader">
               <h2>{mapData.title}</h2>
@@ -1213,6 +1705,7 @@ export default function EditorPage() {
             </div>
 
             <button
+              disabled={!!movingPin}
               className="sidebarEditButton"
               onClick={() => setManageGroupsModalOpen(true)}
             >
@@ -1278,456 +1771,854 @@ export default function EditorPage() {
               </div>
             )}
 
-            <div className="sidebarSection">
-              <h3>Rotas</h3>
-
-              <div className="sidebarPlaceholder">
-                Lista de rotas vai aparecer aqui.
-              </div>
-            </div>
           </>
         )}
       </aside>
 
-      <header className="topbar">
+      <aside
+        className={
+          routeSidebarCollapsed
+            ? "mapSidebar routeMapSidebar collapsed"
+            : "mapSidebar routeMapSidebar"
+        }
+      >
+        <button
+          className="sidebarCollapseButton"
+          onClick={() => setRouteSidebarCollapsed((prev) => !prev)}
+        >
+          {routeSidebarCollapsed ? "‹" : "›"}
+        </button>
+
+        {!routeSidebarCollapsed && (
+          <RouteSidebarContent
+            routes={routes}
+            filteredRoutes={filteredRoutes}
+            hiddenRouteIds={hiddenRouteIds}
+            selectedRoute={selectedRoute}
+            routeSearch={routeSearch}
+            routeEffectsEnabled={routeEffectsEnabled}
+            canManage={MAP_ACCESS.editor.canEditRoutes}
+            manageDisabled={!!movingPin}
+            labels={{
+              title: t("route.title"),
+              count: t("route.count"),
+              showAll: t("actions.showAll"),
+              hideAll: t("actions.hideAll"),
+              effectOn: t("route.effectOn"),
+              effectOff: t("route.effectOff"),
+              search: t("route.search"),
+              manage: t("actions.orderRoutes"),
+              empty: t("route.empty"),
+              showRoute: t("route.show"),
+              hideRoute: t("route.hide"),
+              noDescription: t("common.noDescription"),
+            }}
+            onSearchChange={setRouteSearch}
+            onShowAll={showAllRoutes}
+            onHideAll={hideAllRoutes}
+            onToggleEffects={() => setRouteEffectsEnabled((prev) => !prev)}
+            onManageRoutes={() => {
+              setRouteOrderDraft(orderedRoutes);
+              setManageRoutesModalOpen(true);
+            }}
+            onSelectRoute={(route) => {
+              if (movingPin) return;
+              selectRouteFromList(route);
+            }}
+            onToggleRouteVisibility={toggleRouteVisibility}
+          />
+        )}
+
+        {false && !routeSidebarCollapsed && (
+          <>
+            <div className="sidebarHeader">
+              <h2>Rotas</h2>
+              <p>{routes.length} rota(s)</p>
+            </div>
+
+            <div className="sidebarActions">
+              <button onClick={showAllRoutes}>Show All</button>
+              <button onClick={hideAllRoutes}>Hide All</button>
+
+              <button onClick={() => setRouteEffectsEnabled((prev) => !prev)}>
+                {routeEffectsEnabled ? "Effect ON" : "Effect OFF"}
+              </button>
+            </div>
+
+            <div className="sidebarSearch">
+              <input
+                value={routeSearch}
+                onChange={(event) => setRouteSearch(event.target.value)}
+                placeholder="Search routes..."
+              />
+            </div>
+
+            <button
+              disabled={!!movingPin}
+              className="sidebarEditButton"
+              onClick={() => {
+                setRouteOrderDraft(orderedRoutes);
+                setManageRoutesModalOpen(true);
+              }}
+            >
+              Ordenar Rotas
+            </button>
+
+            {filteredRoutes.length === 0 ? (
+              <div className="sidebarPlaceholder">Nenhuma rota encontrada.</div>
+            ) : (
+              <div className="routeList">
+                {filteredRoutes.map((route, index) => {
+                  const isHidden = hiddenRouteIds.includes(route._id);
+                  const isSelected = selectedRoute?._id === route._id;
+
+                  return (
+                    <div
+                      key={route._id}
+                      className={isSelected ? "routeListItem selected" : "routeListItem"}
+                    >
+                      <button
+                        className="routeListMain"
+                        onClick={() => {
+                            if (movingPin) return;
+                            selectRouteFromList(route);
+                          }}
+                        title={route.name}
+                      >
+                        <span className="routeIndex">{index + 1}</span>
+
+                        <span
+                          className="routeColorDot"
+                          style={{
+                            background:
+                              selectedRoute?._id === route._id
+                                ? editingRouteData?.color || route.color || "#ef4444"
+                                : route.color || "#ef4444",
+                          }}
+                        />
+
+                        <span className={isHidden ? "routeHiddenText" : ""}>
+                          {route.name}
+                        </span>
+                      </button>
+
+                      <button
+                        className={isHidden ? "routeEyeButton hidden" : "routeEyeButton"}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleRouteVisibility(route._id);
+                        }}
+                        title={isHidden ? "Mostrar rota" : "Ocultar rota"}
+                      >
+                        {isHidden ? "🙈" : "👁️"}
+                      </button>
+
+                      {isSelected && (
+                        <div className="routeListDescription">
+                          {route.description || "Sem descrição."}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
+      </aside>
+
+      <header className="topbar editorTopbar">
         <div>
           <h1>{mapData.title}</h1>
-          <p>Clique no mapa para adicionar pins.</p>
+          <p>{t("map.subtitleEditor")}</p>
         </div>
 
-        <div className="topbarActions">
-          <span>{pins.length} pins</span>
+        <div className="topbarRight">
+        {movingPin ? (
+            <div className="movePinHeader">
+              <span className="movePinText">
+                {t("map.movePin")}
+              </span>
 
-          <Link className="backLink" href="/">
-            Dashboard
-          </Link>
+              <button className="secondary" onClick={cancelMovePin}>
+                {t("actions.cancel")}
+              </button>
+            </div>
+          ) : (
+            <>
+              {isDrawingRoute || selectedRoute ? (
+                <div className="routeEditingBar">
+                  <div className="routeLeft">
+                    <strong>
+                      {isDrawingRoute ? t("route.creating") : t("route.editing")}
+                    </strong>
+                    <span>
+                      {isDrawingRoute
+                        ? `${routePoints.length} ${t("route.points")}`
+                        : t("map.editMode")}
+                    </span>
+                  </div>
 
-          <button
-            className={isAddingPin ? "activeAddButton" : "addButton"}
-            onClick={() => {
-              setIsAddingPin((prev) => !prev);
-              setIsDrawingRoute(false);
-            }}
-          >
-            {isAddingPin ? "Clique no mapa..." : "Adicionar pin"}
-          </button>
+                  <div className="routeCenter">
+                    <input
+                      value={isDrawingRoute ? routeName : editingRouteData?.name || ""}
+                      onChange={(event) => {
+                        if (isDrawingRoute) {
+                          setRouteName(event.target.value);
+                        } else {
+                          setEditingRouteData((prev) => ({
+                            ...prev,
+                            name: event.target.value,
+                          }));
+                        }
+                      }}
+                      placeholder={t("route.name")}
+                    />
 
-          <button
-            className={isDrawingRoute ? "activeAddButton" : "addButton"}
-            onClick={startRouteMode}
-          >
-            {isDrawingRoute ? "Desenhando rota..." : "Adicionar rota"}
-          </button>
+                    <input
+                      value={
+                        isDrawingRoute
+                          ? routeDescription
+                          : editingRouteData?.description || ""
+                      }
+                      onChange={(event) => {
+                        if (isDrawingRoute) {
+                          setRouteDescription(event.target.value);
+                        } else {
+                          setEditingRouteData((prev) => ({
+                            ...prev,
+                            description: event.target.value,
+                          }));
+                        }
+                      }}
+                      placeholder={t("common.description")}
+                    />
+                  </div>
 
-          <button onClick={copyPublicLink}>Copiar link</button>
-          <button onClick={clearPins}>Limpar pins</button>
+                  <div className="routeRight">
+                    <div>
+                    <label>
+                      {t("common.color")}
+                      <input
+                        type="color"
+                        value={
+                          isDrawingRoute
+                            ? routeColor
+                            : editingRouteData?.color || "#3b82f6"
+                        }
+                        onChange={(event) => {
+                          if (isDrawingRoute) {
+                            setRouteColor(event.target.value);
+                          } else {
+                            setEditingRouteData((prev) => ({
+                              ...prev,
+                              color: event.target.value,
+                            }));
+                          }
+                        }}
+                      />
+                    </label>
 
-          <select
-            className="filterSelect"
-            value={categoryFilter}
-            onChange={(event) => setCategoryFilter(event.target.value)}
-          >
-            <option value="all">Todas categorias</option>
-            {pinCategories.length > 0
-              ? pinCategories.map((category) => (
-                  <option key={category.value} value={category.value}>
-                    {category.label}
-                  </option>
-                ))
-              : CATEGORIES.map((category) => (
-                  <option key={category.value} value={category.value}>
-                    {category.label}
-                  </option>
-                ))}
-          </select>
+                    <label>
+                      {isDrawingRoute ? routeWidth : editingRouteData?.width || 4}px
+                      <input
+                        type="range"
+                        min="2"
+                        max="10"
+                        value={isDrawingRoute ? routeWidth : editingRouteData?.width || 4}
+                        onChange={(event) => {
+                          const value = Number(event.target.value);
 
-          <button onClick={() => setRouteEffectsEnabled((prev) => !prev)}>
-            {routeEffectsEnabled ? "Efeitos ON" : "Efeitos OFF"}
-          </button>
+                          if (isDrawingRoute) {
+                            setRouteWidth(value);
+                          } else {
+                            setEditingRouteData((prev) => ({
+                              ...prev,
+                              width: value,
+                            }));
+                          }
+                        }}
+                      />
+                    </label>
+                    </div>
+                    <div>
+                    {isDrawingRoute && (
+                      <>
+                        <button onClick={undoLastPoint} disabled={routePoints.length === 0}>
+                          ↶
+                        </button>
+
+                        <button onClick={clearRoutePoints} disabled={routePoints.length === 0}>
+                          ✕
+                        </button>
+                      </>
+                    )}
+
+                    {isDrawingRoute ? (
+                      <>
+                        <button className="primary" onClick={saveRoute}>
+                          {t("actions.save")}
+                        </button>
+
+                        <button className="danger" onClick={cancelRouteMode}>
+                          {t("actions.cancel")}
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="primary" onClick={updateRoute}>
+                          {t("actions.save")}
+                        </button>
+
+                        <button
+                          className="danger"
+                          onClick={() => deleteRoute(selectedRoute._id)}
+                        >
+                          {t("actions.delete")}
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setSelectedRoute(null);
+                            setIsEditingRoute(false);
+                          }}
+                        >
+                          {t("actions.cancel")}
+                        </button>
+                      </>
+                    )}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+
+              <div className="topbarActions">
+                <div className="headerStats" aria-label="Estatisticas do mapa">
+                  <span>
+                    {t("stats.pins")}
+                    <strong>{pins.length}</strong>
+                  </span>
+
+                  <span>
+                    {t("stats.editors")}
+                    <strong>0</strong>
+                  </span>
+
+                  <span>
+                    {t("stats.categories")}
+                    <strong>{pinTypes.length}</strong>
+                  </span>
+
+                  <span>
+                    {t("stats.routes")}
+                    <strong>{routes.length}</strong>
+                  </span>
+                </div>
+
+                <div className="headerMainActions">
+                <Link className="backLink" href="/">
+                  {t("actions.dashboard")}
+                </Link>
+
+                <button
+                  disabled={!!movingPin}
+                  className={isAddingPin ? "activeAddButton" : "addButton"}
+                  onClick={() => {
+                    setIsAddingPin((prev) => !prev);
+                    setIsDrawingRoute(false);
+                  }}
+                >
+                  {isAddingPin ? t("map.addingPin") : t("actions.addPin")}
+                </button>
+
+                <button
+                  disabled={!!movingPin}
+                  className={isDrawingRoute ? "activeAddButton" : "addButton"}
+                  onClick={startRouteMode}
+                >
+                  {isDrawingRoute ? t("map.drawRoute") : t("actions.addRoute")}
+                </button>
+
+                <button onClick={copyPublicLink}>{t("actions.copyLink")}</button>
+                </div>
+
+                <div className="headerSettings">
+                  <MapLanguageSelect locale={locale} onLocaleChange={setLocale} />
+                </div>
+              </div>
+              )}
+            </>
+          )}
         </div>
       </header>
 
-      <section className="mapArea">
-        <TransformWrapper
-          initialScale={1}
-          minScale={0.5}
-          maxScale={5}
-          wheel={{ step: 0.001 }}
-          doubleClick={{ disabled: true }}
-        >
-          {({ zoomIn, zoomOut, resetTransform }) => (
-            <>
-              <div className="controls">
-                <button onClick={() => zoomIn()}>+</button>
-                <button onClick={() => zoomOut()}>-</button>
-                <button onClick={() => resetTransform()}>Reset</button>
-              </div>
+      <div
+        className="mapViewport"
+      >
+        <section className="mapArea">
+            <TransformWrapper
+            initialScale={1}
+            minScale={0.2}
+            maxScale={4}
+            wheel={{
+              step: 0.002,
+              smoothStep: 0.006,
+            }}
+            doubleClick={{ disabled: true }}
+            limitToBounds={false}
+            centerOnInit={true}
+            centerZoomedOut={false}
+            zoomAnimation={{
+              disabled: false,
+              animationTime: 80,
+              size: 0.15,
+            }}
+            alignmentAnimation={{ disabled: true }}
+            velocityAnimation={{ disabled: true }}
+          >
+            {({ zoomIn, zoomOut, resetTransform, setTransform }) => {
+              function centerMap() {
+                const wrapper = document.querySelector(".transformWrapper");
+                const content = document.querySelector(".imageWrapper");
 
-              <TransformComponent
-                wrapperClass="transformWrapper"
-                contentClass="transformContent"
-              >
+                if (!wrapper || !content) return;
+
+                const scale = 1;
+                const x = (wrapper.clientWidth - content.offsetWidth * scale) / 2;
+                const y = (wrapper.clientHeight - content.offsetHeight * scale) / 2;
+
+                setTransform(x, y, scale, 200);
+              }
+
+              return (
+                <>
                 <div
                   className={
-                    isDrawingRoute
-                      ? "imageWrapper drawingRoute"
-                      : isAddingPin
-                      ? "imageWrapper addingPin"
-                      : "imageWrapper"
+                    routeSidebarCollapsed
+                      ? "mapControls"
+                      : "mapControls mapControlsWithRouteSidebar"
                   }
-                  onClick={handleMapClick}
-                  onMouseMove={handleMapMouseMove}
                 >
-                  <img
-                    src={mapData.imageUrl}
-                    alt={mapData.title}
-                    className="mapImage"
-                    draggable="false"
-                  />
+                  <button onClick={() => zoomIn()} title={t("map.zoomIn")}>
+                    +
+                  </button>
 
-                  <svg
-                    className="routesLayer"
-                    viewBox="0 0 100 100"
-                    preserveAspectRatio="none"
+                  <button onClick={() => zoomOut()} title={t("map.zoomOut")}>
+                    -
+                  </button>
+
+                  <button onClick={centerMap} title={t("map.center")}>
+                    🎯
+                  </button>
+                </div>
+
+                <TransformComponent
+                  wrapperClass="transformWrapper"
+                  contentClass="transformContent"
+                  wrapperStyle={{ background: "#0b0b10" }}
+                >
+                  <div
+                    className={
+                      isDrawingRoute
+                        ? "imageWrapper drawingRoute"
+                        : isAddingPin
+                        ? "imageWrapper addingPin"
+                        : "imageWrapper"
+                    }
+                    onClick={(event) => {
+                      if (movingPin) {
+                        setConfirmMovePinOpen(true);
+                        return;
+                      }
+                      closeContextMenu();
+
+                      const mapClickPoint =
+                        mapMouseDownPointRef.current || mapMouseDownPoint;
+
+                      if (mapClickPoint) {
+                        const distance = Math.hypot(
+                          event.clientX - mapClickPoint.clientX,
+                          event.clientY - mapClickPoint.clientY
+                        );
+
+                        if (distance <= 4 && !isAddingPin && !isDrawingRoute) {
+                          setSelectedPin(null);
+                          setSelectedRoute(null);
+                          setIsEditingRoute(false);
+                        }
+                      }
+
+                      mapMouseDownPointRef.current = null;
+                      setMapMouseDownPoint(null);
+                      handleMapClick(event);
+                    }}
+                    onContextMenu={openMapContextMenu}
+                    onMouseDown={handleMapMouseDown}
+                    onMouseUp={handleMapMouseUp}
+                    onMouseMove={(event) => {
+                      handleMapMouseMove(event);
+                      handleMovePinMouseMove(event);
+                    }}
+
+                    onMouseLeave={() => {
+                      if (isDrawingRoute) {
+                        setMousePoint(null);
+                      }
+                    }}
                   >
-                    {routes
-                      .filter((route) => !hiddenRouteIds.includes(route._id))
-                      .map((route) => (
+                    <img
+                      src={mapData.imageUrl}
+                      alt={mapData.title}
+                      className="mapImage"
+                      draggable="false"
+                      onLoad={() => {
+                        setTimeout(centerMap, 50);
+                      }}
+                    />
+
+                    <svg
+                      className="routesLayer"
+                      viewBox="0 0 100 100"
+                      preserveAspectRatio="none"
+                    >
+                      {routes
+                        .filter((route) => !hiddenRouteIds.includes(route._id))
+                        .map((route) => (
+                          <polyline
+                            key={route._id}
+                            points={route.points
+                              .map((point) => `${point.x},${point.y}`)
+                              .join(" ")}
+                            fill="none"
+                            stroke={
+                              selectedRoute?._id === route._id
+                                ? editingRouteData?.color || route.color || "#ef4444"
+                                : route.color || "#ef4444"
+                            }
+                            strokeWidth={
+                              selectedRoute?._id === route._id
+                                ? editingRouteData?.width || route.width || 4
+                                : hoveredRouteId === route._id
+                                ? (route.width || 4) + 1
+                                : route.width || 4
+                            }
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            vectorEffect="non-scaling-stroke"
+                            strokeDasharray="8 6"
+                            className={
+                              !isDrawingRoute &&
+                              routeEffectsEnabled &&
+                              (selectedRoute?._id === route._id || hoveredRouteId === route._id)
+                                ? "routeLine routeLineActive"
+                                : "routeLine"
+                            }
+                            opacity={
+                              movingPin
+                                ? 0.25
+                                : isDrawingRoute
+                                ? 1
+                                : selectedRoute?._id && selectedRoute._id !== route._id
+                                ? 0.35
+                                : hoveredRouteId && hoveredRouteId !== route._id
+                                ? 0.55
+                                : 1
+                            }
+                            onMouseEnter={() => {
+                              if (isDrawingRoute) return;
+                              setHoveredRouteId(route._id);
+                            }}
+                            onMouseLeave={() => {
+                              if (isDrawingRoute) return;
+                              setHoveredRouteId(null);
+                            }}
+                            onClick={(event) => handleRouteClick(event, route)}
+                          />
+                        ))}
+
+                      {routePoints.length > 1 && (
                         <polyline
-                          key={route._id}
-                          points={route.points
+                          points={routePoints
                             .map((point) => `${point.x},${point.y}`)
                             .join(" ")}
                           fill="none"
-                          stroke={route.color || "#ef4444"}
-                          strokeWidth={
-                            selectedRoute?._id === route._id ||
-                            hoveredRouteId === route._id
-                              ? (route.width || 4) + 1
-                              : route.width || 4
-                          }
+                          stroke={routeColor}
+                          strokeWidth={routeWidth}
                           strokeLinecap="round"
                           strokeLinejoin="round"
                           vectorEffect="non-scaling-stroke"
                           strokeDasharray="8 6"
-                          className={
-                            routeEffectsEnabled &&
-                            (selectedRoute?._id === route._id ||
-                              hoveredRouteId === route._id)
-                              ? "routeLine routeLineActive"
-                              : "routeLine"
-                          }
-                          opacity={
-                            selectedRoute?._id && selectedRoute._id !== route._id
-                              ? 0.35
-                              : hoveredRouteId && hoveredRouteId !== route._id
-                              ? 0.55
-                              : 1
-                          }
-                          onMouseEnter={() => setHoveredRouteId(route._id)}
-                          onMouseLeave={() => setHoveredRouteId(null)}
-                          onClick={(event) => handleRouteClick(event, route)}
+                        />
+                      )}
+
+                      {isDrawingRoute && routePoints.length > 0 && mousePoint && (
+                        <line
+                          x1={routePoints[routePoints.length - 1].x}
+                          y1={routePoints[routePoints.length - 1].y}
+                          x2={mousePoint.x}
+                          y2={mousePoint.y}
+                          stroke={routeColor}
+                          strokeWidth={routeWidth}
+                          strokeLinecap="round"
+                          vectorEffect="non-scaling-stroke"
+                          strokeDasharray="8 6"
+                          opacity="0.75"
+                        />
+                      )}
+
+                      {isDrawingRoute &&
+                        routes
+                          .filter((route) => !hiddenRouteIds.includes(route._id))
+                          .flatMap((route) =>
+                            route.points.map((point, index) => (
+                              <circle
+                                key={`snap-${route._id}-${index}`}
+                                cx={point.x}
+                                cy={point.y}
+                                r="0.75"
+                                className="routeSnapPoint"
+                                style={{ "--route-color": routeColor }}
+                                onMouseDown={(event) => {
+                                  event.stopPropagation();
+                                  setRouteMouseDownPoint(null);
+                                }}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+
+                                  setRouteMouseDownPoint(null);
+
+                                  setRoutePoints((prev) => [
+                                    ...prev,
+                                    {
+                                      x: point.x,
+                                      y: point.y,
+                                    },
+                                  ]);
+                                }}
+                              />
+                            ))
+                          )}
+
+                          {isDrawingRoute &&
+                            routePoints.map((point, index) => (
+                              <circle
+                                key={`current-snap-${index}`}
+                                cx={point.x}
+                                cy={point.y}
+                                r="0.75"
+                                className="routeSnapPoint currentRouteSnapPoint"
+                                style={{ "--route-color": routeColor }}
+                                onMouseDown={(event) => {
+                                  event.stopPropagation();
+                                  setRouteMouseDownPoint(null);
+                                }}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setRouteMouseDownPoint(null);
+
+                                  setRoutePoints((prev) => [
+                                    ...prev,
+                                    {
+                                      x: point.x,
+                                      y: point.y,
+                                    },
+                                  ]);
+                                }}
+                              />
+                            ))}
+
+                      {routePoints.map((point, index) => (
+                        <circle
+                          key={index}
+                          cx={point.x}
+                          cy={point.y}
+                          r="0.8"
+                          fill={routeColor}
                         />
                       ))}
+                    </svg>
 
-                    {routePoints.length > 1 && (
-                      <polyline
-                        points={routePoints
-                          .map((point) => `${point.x},${point.y}`)
-                          .join(" ")}
-                        fill="none"
-                        stroke={routeColor}
-                        strokeWidth={routeWidth}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        vectorEffect="non-scaling-stroke"
-                        strokeDasharray="8 6"
-                      />
-                    )}
+                    {filteredPins.map((pin) => (
+                      <button
+                        key={pin._id}
+                        className={
+                          movingPin
+                            ? movingPin._id === pin._id
+                              ? pin.iconType === "custom"
+                                ? "pin customPin movingPinActive"
+                                : "pin emojiPin movingPinActive"
+                              : pin.iconType === "custom"
+                              ? "pin customPin routeEditingDimmed"
+                              : "pin emojiPin routeEditingDimmed"
+                            : isDrawingRoute
+                            ? pin.iconType === "custom"
+                              ? "pin customPin routeEditingDimmed"
+                              : "pin emojiPin routeEditingDimmed"
+                            : pin.iconType === "custom"
+                            ? "pin customPin"
+                            : "pin emojiPin"
+                        }
+                        style={{
+                          left: `${
+                            movingPin?._id === pin._id && movingPinPosition
+                              ? movingPinPosition.x
+                              : pin.x
+                          }%`,
+                          top: `${
+                            movingPin?._id === pin._id && movingPinPosition
+                              ? movingPinPosition.y
+                              : pin.y
+                          }%`,
+                        }}
+                        onClick={(event) => {
+                          if (movingPin) {
+                            event.stopPropagation();
+                            setConfirmMovePinOpen(true);
+                            return;
+                          }
 
-                    {isDrawingRoute && routePoints.length > 0 && mousePoint && (
-                      <line
-                        x1={routePoints[routePoints.length - 1].x}
-                        y1={routePoints[routePoints.length - 1].y}
-                        x2={mousePoint.x}
-                        y2={mousePoint.y}
-                        stroke={routeColor}
-                        strokeWidth={routeWidth}
-                        strokeLinecap="round"
-                        vectorEffect="non-scaling-stroke"
-                        strokeDasharray="8 6"
-                        opacity="0.75"
-                      />
-                    )}
-
-                    {routePoints.map((point, index) => (
-                      <circle
-                        key={index}
-                        cx={point.x}
-                        cy={point.y}
-                        r="0.8"
-                        fill={routeColor}
-                      />
+                          handlePinClick(event, pin);
+                        }}
+                        title={pin.name}
+                      >
+                        {renderPinIcon(pin)}
+                      </button>
                     ))}
-                  </svg>
 
-                  {filteredPins.map((pin) => (
-                    <button
-                      key={pin._id}
-                      className={
-                        pin.iconType === "custom"
-                          ? "pin customPin"
-                          : "pin emojiPin"
-                      }
-                      style={{
-                        left: `${pin.x}%`,
-                        top: `${pin.y}%`,
-                      }}
-                      onClick={(event) => handlePinClick(event, pin)}
-                      title={pin.name}
-                    >
-                      {renderPinIcon(pin)}
-                    </button>
-                  ))}
-                </div>
-              </TransformComponent>
-            </>
-          )}
-        </TransformWrapper>
-      </section>
+                    {selectedPin && pinPopupPosition && (
+                      <div
+                        className="pinInfoPopup mapAttachedPopup"
+                        style={{
+                          left: `${pinPopupPosition.x}%`,
+                          top: `${pinPopupPosition.y}%`,
+                        }}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onMouseUp={(event) => event.stopPropagation()}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onPointerUp={(event) => event.stopPropagation()}
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <button
+                          className="pinPopupClose"
+                          onClick={() => setSelectedPin(null)}
+                        >
+                          ×
+                        </button>
 
-      {isDrawingRoute && (
-        <div className="routePanel">
-          <h3>Nova rota</h3>
+                        <div className="pinPopupHeader">
+                          <div className="pinPopupIcon">
+                            {selectedPin.iconType === "custom" ? (
+                              <img src={selectedPin.iconImageUrl} alt={selectedPin.name} />
+                            ) : (
+                              selectedPin.icon || "📍"
+                            )}
+                          </div>
 
-          <input
-            value={routeName}
-            onChange={(event) => setRouteName(event.target.value)}
-            placeholder="Nome da rota"
-          />
+                          <div className="pinPopupTitle">
+                            {selectedPin.name || t("common.noName")}
+                          </div>
+                        </div>
 
-          <label>
-            Cor
-            <input
-              type="color"
-              value={routeColor}
-              onChange={(event) => setRouteColor(event.target.value)}
-            />
-          </label>
+                        {selectedPin.description && (
+                          <div className="pinPopupDescription">
+                            {selectedPin.description}
+                          </div>
+                        )}
 
-          <label>
-            Espessura
-            <input
-              type="range"
-              min="2"
-              max="10"
-              value={routeWidth}
-              onChange={(event) => setRouteWidth(Number(event.target.value))}
-            />
-          </label>
+                        <div className="pinPopupMeta">
+                          <div>
+                            <strong>{t("common.group")}:</strong>{" "}
+                            {pinGroups.find(
+                              (group) => group.value === (selectedPin.category || "geral")
+                            )?.label || "—"}
+                          </div>
 
-          <p>{routePoints.length} ponto(s)</p>
+                          <div>
+                            <strong>{t("common.category")}:</strong>{" "}
+                            {selectedPin.typeName || "—"}
+                          </div>
+                        </div>
 
-          <p className="routeHint">
-            Clique no mapa para adicionar pontos
-            <br />
-            Enter = salvar • Esc = cancelar
-          </p>
+                        <div className="pinPopupActions">
+                          <button className="secondary" onClick={() => openEditModal(selectedPin)}>
+                            {t("actions.edit")}
+                          </button>
 
-          <div className="routePanelActions">
-            <button onClick={undoLastPoint} disabled={routePoints.length === 0}>
-              Desfazer
-            </button>
+                          <button className="secondary" onClick={() => startMovePin(selectedPin)}>
+                            {t("actions.move")}
+                          </button>
 
-            <button
-              onClick={clearRoutePoints}
-              disabled={routePoints.length === 0}
-            >
-              Limpar
-            </button>
-          </div>
-
-          <div className="routePanelActions">
-            <button onClick={saveRoute}>Salvar</button>
-            <button onClick={cancelRouteMode}>Cancelar</button>
-          </div>
-        </div>
-      )}
-
-      {routes.length > 0 && (
-        <div className="routeSidebar">
-          <h3>Rotas</h3>
-
-          {routes.map((route) => {
-            const isHidden = hiddenRouteIds.includes(route._id);
-            const isSelected = selectedRoute?._id === route._id;
-
-            return (
-              <div
-                className={
-                  isSelected ? "routeSidebarItem selected" : "routeSidebarItem"
-                }
-                key={route._id}
-              >
-                <button
-                  className="routeNameButton"
-                  onClick={() => selectRouteFromList(route)}
-                  title={route.name}
-                >
-                  <span
-                    className="routeColorDot"
-                    style={{ background: route.color || "#ef4444" }}
-                  />
-
-                  <span className={isHidden ? "routeHiddenText" : ""}>
-                    {route.name}
-                  </span>
-                </button>
-
-                <div className="routeSidebarActions">
-                  <button onClick={() => toggleRouteVisibility(route._id)}>
-                    {isHidden ? "Mostrar" : "Ocultar"}
-                  </button>
-
-                  <button
-                    className="danger"
-                    onClick={() => deleteRoute(route._id)}
-                  >
-                    Del
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {selectedRoute && (
-        <div className="popup">
-          <button
-            className="closeButton"
-            onClick={() => {
-              setSelectedRoute(null);
-              setIsEditingRoute(false);
+                          <button className="danger" onClick={() => deletePin(selectedPin._id)}>
+                            {t("actions.delete")}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </TransformComponent>
+                </>
+              );
             }}
-          >
-            ×
-          </button>
+            </TransformWrapper>
+        </section>
+      </div>
 
-          {isEditingRoute ? (
-            <>
-              <input
-                value={editingRouteData.name}
-                onChange={(event) =>
-                  setEditingRouteData((prev) => ({
-                    ...prev,
-                    name: event.target.value,
-                  }))
-                }
-                placeholder="Nome da rota"
-              />
+      {confirmMovePinOpen && (
+        <div className="modalOverlay">
+          <div className="modal smallModal" onClick={(event) => event.stopPropagation()}>
+            <h2>Mover pin?</h2>
+            <p className="modalSubtitle">
+              Deseja salvar a nova posição deste pin?
+            </p>
 
-              <label>
-                Cor
-                <input
-                  type="color"
-                  value={editingRouteData.color}
-                  onChange={(event) =>
-                    setEditingRouteData((prev) => ({
-                      ...prev,
-                      color: event.target.value,
-                    }))
+            <div className="modalActions">
+              <button
+                className="primary"
+                onClick={() => {
+                  const pinToMove = movingPin;
+                  const positionToSave = movingPinPosition;
+
+                  if (!pinToMove || !positionToSave) {
+                    alert("Não foi possível salvar: posição do pin não encontrada.");
+                    return;
                   }
-                />
-              </label>
 
-              <label>
-                Espessura
-                <input
-                  type="range"
-                  min="2"
-                  max="10"
-                  value={editingRouteData.width}
-                  onChange={(event) =>
-                    setEditingRouteData((prev) => ({
-                      ...prev,
-                      width: Number(event.target.value),
-                    }))
-                  }
-                />
-              </label>
+                  setConfirmMovePinOpen(false);
+                  finishMovePin(pinToMove, positionToSave);
+                }}
+              >
+                {t("actions.save")}
+              </button>
 
-              <div className="popupActions">
-                <button onClick={updateRoute}>Salvar</button>
-              </div>
-            </>
-          ) : (
-            <>
-              <h2>{selectedRoute.name}</h2>
-
-              <p className="emptyText">
-                {selectedRoute.points.length} pontos
-              </p>
-
-              <div className="popupActions">
-                <button onClick={() => setIsEditingRoute(true)}>Editar</button>
-
-                <button
-                  className="danger"
-                  onClick={() => deleteRoute(selectedRoute._id)}
-                >
-                  Deletar
-                </button>
-              </div>
-            </>
-          )}
+              <button
+                className="secondary"
+                onClick={() => {
+                  setConfirmMovePinOpen(false);
+                  cancelMovePin();
+                }}
+              >
+                {t("actions.cancel")}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
-      {selectedPin && (
-        <div className="popup">
-          <button className="closeButton" onClick={() => setSelectedPin(null)}>
-            ×
-          </button>
-
-          <div className="popupIcon">{renderPinIcon(selectedPin)}</div>
-
-          <h2>{selectedPin.name}</h2>
-
-          {selectedPin.description ? (
-            <p>{selectedPin.description}</p>
-          ) : (
-            <p className="emptyText">Sem descrição.</p>
-          )}
-
-          <div className="pinCategory">
-            Grupo:{" "}
-            {pinCategories.find(
-              (category) =>
-                category.value === (selectedPin.category || "geral")
-            )?.label || "Geral"}
-          </div>
-
-          <div className="pinCategory">
-            Categoria: {selectedPin.typeName || selectedPin.name}
-          </div>
-
-          <div className="coords">
-            X: {selectedPin.x.toFixed(2)}% | Y: {selectedPin.y.toFixed(2)}%
-          </div>
-
-          <div className="popupActions">
-            <button onClick={() => openEditModal(selectedPin)}>Editar</button>
-
-            <button
-              className="danger"
-              onClick={() => deletePin(selectedPin._id)}
-            >
-              Deletar
-            </button>
-          </div>
+      {contextMenu && (
+        <div
+          className="mapContextMenu"
+          style={{
+            left: contextMenu.screenX,
+            top: contextMenu.screenY,
+          }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <button onClick={addPinFromContextMenu}>Adicionar Pin</button>
+          <button onClick={addRouteFromContextMenu}>Adicionar Rota</button>
         </div>
       )}
+
+
 
       {manageGroupsModalOpen && (
         <div className="modalOverlay">
@@ -1738,8 +2629,8 @@ export default function EditorPage() {
             <div className="manageGroupsHeader">
               <div className="manageHeaderTop">
                 <div>
-                  <h2>Gerenciar</h2>
-                  <p>Edite grupos e categorias compartilhados entre os mapas.</p>
+                  <h2>{t("manage.manage")}</h2>
+                  <p>{t("manage.groupDescription")}</p>
                 </div>
 
                 <button className="closeButton" onClick={closeManageGroupsModal}>
@@ -1750,62 +2641,65 @@ export default function EditorPage() {
               <button
                 className="primary manageAddGroupButton"
                 onClick={() => {
-                  setCreateMode(createMode === "group" ? null : "group");
+                  openManageUI("create-group");
                   setCreateValue("");
-                  setExpandedManageItem(null);
-                  setRenameMode(false);
-                  setMoveMode(false);
                 }}
               >
-                + Grupo
+                {t("manage.addGroup")}
               </button>
             </div>
 
-            {createMode === "group" && (
+            {activeManageUI === "create-group" && (
               <div className="manageCreateBox">
                 <input
                   value={createValue}
                   onChange={(event) => setCreateValue(event.target.value)}
-                  placeholder="Nome do novo grupo"
+                  placeholder={t("manage.newGroupName")}
                   autoFocus
                 />
 
                 <button className="primary" onClick={createGroup}>
-                  Criar
+                  {t("manage.create")}
                 </button>
 
                 <button
                   className="secondary"
                   onClick={() => {
                     setCreateMode(null);
+                    setActiveManageUI(null);
                     setCreateValue("");
                   }}
                 >
-                  Cancelar
+                  {t("actions.cancel")}
                 </button>
               </div>
             )}
 
             <div className="manageGroupsList">
               {pinGroups.length === 0 ? (
-                <p className="emptyText">Nenhum grupo encontrado.</p>
+                <p className="emptyText">{t("manage.noGroups")}</p>
               ) : (
                 pinGroups.map((group) => (
                   <div className="manageGroupBlock" key={group.value}>
                     <button
                       className="manageGroupHeader"
                       onClick={() => {
+                        const uiKey = `edit-group:${group.value}`;
+
                         const isSameItem =
                           expandedManageItem?.kind === "group" &&
                           expandedManageItem?.value === group.value;
 
-                        if (isSameItem) {
+                        if (isSameItem || activeManageUI === uiKey) {
                           setExpandedManageItem(null);
+                          setActiveManageUI(null);
                           setRenameMode(false);
                           setRenameValue("");
                           setMoveMode(false);
                           return;
                         }
+
+                        setActiveManageUI(uiKey);
 
                         setExpandedManageItem({
                           kind: "group",
@@ -1840,7 +2734,7 @@ export default function EditorPage() {
                                 className="primary"
                                 onClick={() => renameGroup(group)}
                               >
-                                Salvar
+                                {t("actions.save")}
                               </button>
 
                               <button
@@ -1850,7 +2744,7 @@ export default function EditorPage() {
                                   setRenameValue(group.label);
                                 }}
                               >
-                                Cancelar
+                                {t("actions.cancel")}
                               </button>
                             </>
                           ) : (
@@ -1863,13 +2757,13 @@ export default function EditorPage() {
                                   setMoveMode(false);
                                 }}
                               >
-                                Renomear
+                                {t("manage.rename")}
                               </button>
 
                               <button
                                 className="secondary iconButton"
                                 onClick={() => moveGroup(group, "up")}
-                                title="Subir"
+                                title={t("manage.moveUp")}
                               >
                                 ↑
                               </button>
@@ -1877,7 +2771,7 @@ export default function EditorPage() {
                               <button
                                 className="secondary iconButton"
                                 onClick={() => moveGroup(group, "down")}
-                                title="Descer"
+                                title={t("manage.moveDown")}
                               >
                                 ↓
                               </button>
@@ -1886,7 +2780,7 @@ export default function EditorPage() {
                                 className="danger"
                                 onClick={() => deleteGroup(group)}
                               >
-                                Deletar
+                                {t("actions.delete")}
                               </button>
                             </>
                           )}
@@ -1897,21 +2791,16 @@ export default function EditorPage() {
                       <button
                         className="secondary"
                         onClick={() => {
-                          const modeKey = `category:${group.value}`;
-
-                          setCreateMode(createMode === modeKey ? null : modeKey);
+                          openManageUI(`create-category:${group.value}`);
                           setCreateValue("");
                           setCreateCategoryIcon("📍");
-                          setExpandedManageItem(null);
-                          setRenameMode(false);
-                          setMoveMode(false);
                         }}
                       >
-                        + Categoria
+                        {t("manage.addCategory")}
                       </button>
                     </div>
 
-                    {createMode === `category:${group.value}` && (
+                    {activeManageUI === `create-category:${group.value}` && (
                       <div className="manageCreateBox manageCreateBoxNested">
                         <button
                           type="button"
@@ -1931,7 +2820,7 @@ export default function EditorPage() {
                         <input
                           value={createValue}
                           onChange={(event) => setCreateValue(event.target.value)}
-                          placeholder="Nome da nova categoria"
+                          placeholder={t("manage.newCategoryName")}
                           autoFocus
                         />
 
@@ -1939,18 +2828,19 @@ export default function EditorPage() {
                           className="primary"
                           onClick={() => createCategoryInsideGroup(group)}
                         >
-                          Criar
+                          {t("manage.create")}
                         </button>
 
                         <button
                           className="secondary"
                           onClick={() => {
                             setCreateMode(null);
+                            setActiveManageUI(null);
                             setCreateValue("");
                             setCreateCategoryIcon("📍");
                           }}
                         >
-                          Cancelar
+                          {t("actions.cancel")}
                         </button>
                       </div>
                     )}
@@ -1989,6 +2879,7 @@ export default function EditorPage() {
                                 setRenameMode(false);
                                 setRenameValue(type.label);
                                 setMoveMode(false);
+                                setActiveManageUI(`edit:${type.key}`);
                               }}
                             >
                               <span className="sidebarTypeIcon">
@@ -2025,14 +2916,14 @@ export default function EditorPage() {
                                         className="primary"
                                         onClick={() => moveCategory(type)}
                                       >
-                                        Salvar
+                                        {t("actions.save")}
                                       </button>
 
                                       <button
                                         className="secondary"
                                         onClick={() => setMoveMode(false)}
                                       >
-                                        Cancelar
+                                        {t("actions.cancel")}
                                       </button>
                                     </>
                                   ) : renameMode ? (
@@ -2049,7 +2940,7 @@ export default function EditorPage() {
                                         className="primary"
                                         onClick={() => renameCategory(type)}
                                       >
-                                        Salvar
+                                        {t("actions.save")}
                                       </button>
 
                                       <button
@@ -2059,11 +2950,26 @@ export default function EditorPage() {
                                           setRenameValue(type.label);
                                         }}
                                       >
-                                        Cancelar
+                                        {t("actions.cancel")}
                                       </button>
                                     </>
                                   ) : (
                                     <>
+
+                                      <button
+                                        className="secondary"
+                                        onClick={() => {
+                                          setIconPickerMode("edit");
+                                          setEditingIconCategory(type);
+                                          setIconPickerOpen(true);
+                                          setIconPickerTab("default");
+                                          setRenameMode(false);
+                                          setMoveMode(false);
+                                        }}
+                                      >
+                                        {t("manage.changeIcon")}
+                                      </button>
+
                                       <button
                                         className="primary"
                                         onClick={() => {
@@ -2072,7 +2978,7 @@ export default function EditorPage() {
                                           setMoveMode(false);
                                         }}
                                       >
-                                        Renomear
+                                        {t("manage.rename")}
                                       </button>
 
                                       <button
@@ -2085,14 +2991,17 @@ export default function EditorPage() {
                                           setRenameMode(false);
                                         }}
                                       >
-                                        Mover
+                                        {t("actions.move")}
                                       </button>
 
                                       <button
                                         className="danger"
-                                        onClick={() => deleteCategory(type)}
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          deleteCategory(type);
+                                        }}
                                       >
-                                        Deletar
+                                        {t("actions.delete")}
                                       </button>
                                     </>
                                   )}
@@ -2109,13 +3018,87 @@ export default function EditorPage() {
         </div>
       )}
 
+      {manageRoutesModalOpen && (
+        <div className="modalOverlay">
+          <div className="modal manageGroupsModal">
+            <div className="manageGroupsHeader">
+              <div className="manageHeaderTop">
+                <div>
+                  <h2>{t("actions.orderRoutes")}</h2>
+                  <p>{t("manage.routeDescription")}</p>
+                </div>
+
+                <button
+                  className="closeButton"
+                  onClick={() => setManageRoutesModalOpen(false)}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            <div className="manageGroupsList">
+              {routeOrderDraft.length === 0 ? (
+                <p className="emptyText">{t("route.empty")}</p>
+              ) : (
+                routeOrderDraft.map((route, index) => (
+                  <div className="manageRouteOrderItem" key={route._id}>
+                    <span className="routeIndex">{index + 1}</span>
+
+                    <span
+                      className="routeColorDot"
+                      style={{ background: route.color || "#ef4444" }}
+                    />
+
+                    <span className="manageRouteOrderName">{route.name}</span>
+
+                    <button
+                      className="secondary iconButton"
+                      disabled={index === 0}
+                      onClick={() => moveRoute(route, "up")}
+                      title={t("manage.moveUp")}
+                    >
+                      ↑
+                    </button>
+
+                    <button
+                      className="secondary iconButton"
+                      disabled={index === routeOrderDraft.length - 1}
+                      onClick={() => moveRoute(route, "down")}
+                      title={t("manage.moveDown")}
+                    >
+                      ↓
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="modalActions">
+              <button className="primary" onClick={saveRouteOrder}>
+                {t("actions.save")}
+              </button>
+
+              <button
+                className="secondary"
+                onClick={() => {
+                  setRouteOrderDraft([]);
+                  setManageRoutesModalOpen(false);
+                }}
+              >
+                {t("actions.cancel")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {iconPickerOpen && (
         <div className="modalOverlay" onClick={() => setIconPickerOpen(false)}>
           <div className="modal iconPickerModal" onClick={(e) => e.stopPropagation()}>
             <div className="manageGroupsHeader">
               <div>
-                <h2>Escolher ícone</h2>
-                <p>Ícones já usados em categorias ficam bloqueados.</p>
+                <h2>{t("manage.iconPickerTitle")}</h2>
+                <p>{t("manage.iconPickerDescription")}</p>
               </div>
 
               <button className="closeButton" onClick={() => setIconPickerOpen(false)}>
@@ -2128,20 +3111,20 @@ export default function EditorPage() {
                 className={iconPickerTab === "default" ? "selectedToggle" : ""}
                 onClick={() => setIconPickerTab("default")}
               >
-                Padrões
+                {t("manage.iconDefault")}
               </button>
 
               <button
                 className={iconPickerTab === "custom" ? "selectedToggle" : ""}
                 onClick={() => setIconPickerTab("custom")}
               >
-                Customizados
+                {t("manage.iconCustom")}
               </button>
             </div>
 
             {iconPickerTab === "default" ? (
               <div className="iconPickerGrid">
-                {ICONS.map((icon) => {
+                {DEFAULT_ICONS.map((icon) => {
                   const iconKey = `emoji:${icon}`;
                   const used = pinTypes.some((type) => type.iconKey === iconKey);
                   const selected =
@@ -2162,12 +3145,21 @@ export default function EditorPage() {
                       onClick={() => {
                         if (used) return;
 
+                        if (iconPickerMode === "edit" && editingIconCategory) {
+                          updateCategoryIcon(editingIconCategory, {
+                            icon,
+                            iconType: "emoji",
+                            iconImageUrl: "",
+                          });
+                          return;
+                        }
+
                         setCreateCategoryIconType("emoji");
                         setCreateCategoryIcon(icon);
                         setCreateCategoryIconImageUrl("");
                         setIconPickerOpen(false);
                       }}
-                      title={used ? "Este ícone já está em uso" : icon}
+                      title={used ? t("manage.iconInUse") : icon}
                     >
                       {icon}
                     </button>
@@ -2177,7 +3169,7 @@ export default function EditorPage() {
             ) : (
               <div className="iconPickerGrid">
                 {assets.length === 0 ? (
-                  <p className="emptyText">Nenhum ícone customizado neste grupo.</p>
+                  <p className="emptyText">{t("manage.iconEmpty")}</p>
                 ) : (
                   assets.map((asset) => {
                     const iconKey = `custom:${asset.imageUrl}`;
@@ -2200,12 +3192,21 @@ export default function EditorPage() {
                         onClick={() => {
                           if (used) return;
 
+                          if (iconPickerMode === "edit" && editingIconCategory) {
+                            updateCategoryIcon(editingIconCategory, {
+                              icon: "",
+                              iconType: "custom",
+                              iconImageUrl: asset.imageUrl,
+                            });
+                            return;
+                          }
+
                           setCreateCategoryIconType("custom");
                           setCreateCategoryIconImageUrl(asset.imageUrl);
                           setCreateCategoryIcon("📍");
                           setIconPickerOpen(false);
                         }}
-                        title={used ? "Este ícone já está em uso" : asset.name}
+                        title={used ? t("manage.iconInUse") : asset.name}
                       >
                         <img src={asset.imageUrl} alt={asset.name} />
                         <span>{asset.name}</span>
@@ -2223,75 +3224,62 @@ export default function EditorPage() {
         <div className="modalOverlay" onClick={closeModal}>
           <div className="modal" onClick={(event) => event.stopPropagation()}>
             <h2>{editingPin ? "Editar pin" : "Novo pin"}</h2>
+            <p className="modalSubtitle">
+              Escolha uma categoria para o pin e depois preencha as informações.
+            </p>
 
-            <div className="pinFormGrid">
-              <label className="pinFormField">
-                Grupo
-                <select
-                  value={form.category}
-                  onChange={(event) => {
-                    const nextCategory = event.target.value;
+            <div className="pinCategoryPicker">
+              {pinGroups.map((group) => (
+                <div className="pinCategoryGroup" key={group.value}>
+                  <h4>{group.label}</h4>
 
-                    setForm((prev) => ({
-                      ...prev,
-                      category: nextCategory,
-                      typeName: "",
-                      icon: "📍",
-                      iconType: "emoji",
-                      iconImageUrl: "",
-                    }));
-                  }}
-                >
-                  {pinCategories.map((category) => (
-                    <option key={category.value} value={category.value}>
-                      {category.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  {group.types.length === 0 ? (
+                    <p className="emptyText">{t("manage.noCategories")}</p>
+                  ) : (
+                    <div className="pinCategoryGrid">
+                      {group.types.map((type) => {
+                        const selected =
+                          form.typeName === type.label &&
+                          form.category === group.value &&
+                          form.iconType === type.iconType &&
+                          (form.iconImageUrl || "") === (type.iconImageUrl || "");
 
-              <label className="pinFormField">
-                Categoria
-                <select
-                  value={
-                    pinTypes.find(
-                      (type) =>
-                        type.typeName === form.typeName &&
-                        (type.category || "geral") === form.category
-                    )?._id || ""
-                  }
-                  onChange={(event) => applyExistingPinType(event.target.value)}
-                >
-                  <option value="">Selecione uma categoria</option>
-
-                  {pinTypes
-                    .filter((type) => (type.category || "geral") === form.category)
-                    .sort((a, b) =>
-                      a.typeName.localeCompare(b.typeName, "pt-BR", {
-                        sensitivity: "base",
-                      })
-                    )
-                    .map((type) => (
-                      <option key={type._id} value={type._id}>
-                        {type.iconType === "custom" ? "🖼️" : type.icon || "📍"}{" "}
-                        {type.typeName}
-                      </option>
-                    ))}
-                </select>
-              </label>
+                        return (
+                          <button
+                            key={type.key}
+                            type="button"
+                            title={type.label}
+                            className={
+                              selected
+                                ? "pinCategoryOption selected"
+                                : "pinCategoryOption"
+                            }
+                            onClick={() => {
+                              setForm((prev) => ({
+                                ...prev,
+                                typeName: type.label,
+                                category: group.value,
+                                icon: type.icon || "📍",
+                                iconType: type.iconType || "emoji",
+                                iconImageUrl: type.iconImageUrl || "",
+                              }));
+                            }}
+                          >
+                            <span className="pinCategoryOptionIcon">
+                              {type.iconType === "custom" && type.iconImageUrl ? (
+                                <img src={type.iconImageUrl} alt={type.label} />
+                              ) : (
+                                type.icon || "📍"
+                              )}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
-
-            {form.typeName && (
-              <div className="assetPreview">
-                {form.iconType === "custom" && form.iconImageUrl ? (
-                  <img src={form.iconImageUrl} alt={form.typeName} />
-                ) : (
-                  <strong style={{ fontSize: "32px" }}>{form.icon || "📍"}</strong>
-                )}
-
-                <strong>{form.typeName}</strong>
-              </div>
-            )}
 
             <label>
               Nome

@@ -1,19 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import "../../page.css";
+import PinSidebarContent from "@/app/components/map/PinSidebarContent";
+import RouteSidebarContent from "@/app/components/map/RouteSidebarContent";
+import MapLanguageSelect from "@/app/components/map/MapLanguageSelect";
+import useMapLocale from "@/app/components/map/useMapLocale";
 
 export default function PublicMapPage() {
   const params = useParams();
   const mapId = params.id;
+  const { locale, setLocale, t } = useMapLocale();
 
   const [mapData, setMapData] = useState(null);
   const [pins, setPins] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [selectedPin, setSelectedPin] = useState(null);
+  const [pinPopupPosition, setPinPopupPosition] = useState(null);
+  const [mapMouseDownPoint, setMapMouseDownPoint] = useState(null);
+  const mapMouseDownPointRef = useRef(null);
+  const mapDragRef = useRef(false);
 
   const [categoryFilter, setCategoryFilter] = useState("all");
 
@@ -31,6 +40,8 @@ export default function PublicMapPage() {
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarSearch, setSidebarSearch] = useState("");
+  const [routeSidebarCollapsed, setRouteSidebarCollapsed] = useState(false);
+  const [routeSearch, setRouteSearch] = useState("");
 
   const [hiddenPinTypes, setHiddenPinTypes] = useState([]);
   const [pinCategories, setPinCategories] = useState([]);
@@ -51,6 +62,19 @@ export default function PublicMapPage() {
     const typeKey = getPinIconKey(pin);
     return !hiddenPinTypes.includes(typeKey);
   });
+
+  const orderedRoutes = [...routes].sort((a, b) => {
+    const orderA = typeof a.sortOrder === "number" ? a.sortOrder : 9999;
+    const orderB = typeof b.sortOrder === "number" ? b.sortOrder : 9999;
+
+    if (orderA !== orderB) return orderA - orderB;
+
+    return new Date(a.createdAt) - new Date(b.createdAt);
+  });
+
+  const filteredRoutes = orderedRoutes.filter((route) =>
+    route.name.toLowerCase().includes(routeSearch.toLowerCase())
+  );
 
   useEffect(() => {
     async function loadMapAndPins() {
@@ -140,14 +164,30 @@ export default function PublicMapPage() {
 
   function handlePinClick(event, pin) {
     event.stopPropagation();
+
+    if (mapDragRef.current) return;
+
     setSelectedPin(pin);
     setSelectedRoute(null);
+    setPinPopupPosition({
+      x: pin.x,
+      y: pin.y,
+    });
   }
 
   function handleRouteClick(event, route) {
     event.stopPropagation();
+
+    if (mapDragRef.current) return;
+
+    if (selectedRoute?._id === route._id) {
+      setSelectedRoute(null);
+      return;
+    }
+
     setSelectedRoute(route);
     setSelectedPin(null);
+    setPinPopupPosition(null);
   }
 
   function toggleRouteVisibility(routeId) {
@@ -159,8 +199,64 @@ export default function PublicMapPage() {
   }
 
   function selectRouteFromList(route) {
+    if (selectedRoute?._id === route._id) {
+      setSelectedRoute(null);
+      return;
+    }
+
     setSelectedRoute(route);
     setSelectedPin(null);
+    setPinPopupPosition(null);
+  }
+
+  function clearMapSelection() {
+    setSelectedPin(null);
+    setSelectedRoute(null);
+    setPinPopupPosition(null);
+  }
+
+  function handleMapMouseDown(event) {
+    const point = {
+      clientX: event.clientX,
+      clientY: event.clientY,
+    };
+
+    mapMouseDownPointRef.current = point;
+    mapDragRef.current = false;
+    setMapMouseDownPoint(point);
+  }
+
+  function handleMapMouseMove(event) {
+    const point = mapMouseDownPointRef.current;
+
+    if (!point) return;
+
+    const distance = Math.hypot(
+      event.clientX - point.clientX,
+      event.clientY - point.clientY
+    );
+
+    if (distance > 4) {
+      mapDragRef.current = true;
+    }
+  }
+
+  function handleMapMouseUp(event) {
+    const point = mapMouseDownPointRef.current || mapMouseDownPoint;
+
+    if (!point) return;
+
+    const distance = Math.hypot(
+      event.clientX - point.clientX,
+      event.clientY - point.clientY
+    );
+
+    mapMouseDownPointRef.current = null;
+    setMapMouseDownPoint(null);
+
+    if (distance <= 4) {
+      clearMapSelection();
+    }
   }
 
   const sidebarCategories =
@@ -255,6 +351,14 @@ export default function PublicMapPage() {
     );
   }
 
+  function showAllRoutes() {
+    setHiddenRouteIds([]);
+  }
+
+  function hideAllRoutes() {
+    setHiddenRouteIds(routes.map((route) => route._id));
+  }
+
   if (!loaded) {
     return <main className="loadingPage">Carregando...</main>;
   }
@@ -279,121 +383,118 @@ export default function PublicMapPage() {
         </button>
 
         {!sidebarCollapsed && (
-          <>
-            <div className="sidebarHeader">
-              <h2>{mapData.title}</h2>
-              <p>Interactive Map</p>
-            </div>
+          <PinSidebarContent
+            title={mapData.title}
+            subtitle={t("map.interactiveMap")}
+            pinGroups={pinGroups}
+            hiddenPinTypes={hiddenPinTypes}
+            hideEmptyGroups={hideEmptyGroups}
+            search={sidebarSearch}
+            emptyText={t("pin.empty")}
+            labels={{
+              showAll: t("actions.showAll"),
+              hideAll: t("actions.hideAll"),
+              hideEmpty: t("actions.hideEmpty"),
+              search: t("common.search"),
+              manage: t("actions.managePinGroups"),
+            }}
+            onSearchChange={setSidebarSearch}
+            onShowAll={showAllPins}
+            onHideAll={hideAllPins}
+            onToggleHideEmpty={() => setHideEmptyGroups((prev) => !prev)}
+            onToggleCategoryVisibility={toggleCategoryVisibility}
+            onTogglePinTypeVisibility={togglePinTypeVisibility}
+          />
+        )}
 
-            <div className="sidebarActions">
-              <button onClick={showAllPins}>Show All</button>
-              <button onClick={hideAllPins}>Hide All</button>
+      </aside>
 
-              <button
-                className={
-                  hideEmptyGroups
-                    ? "sidebarActionButton activeHidden"
-                    : "sidebarActionButton"
-                }
-                onClick={() => setHideEmptyGroups((prev) => !prev)}
-              >
-                Hide Empty
-              </button>
-            </div>
+      <aside
+        className={
+          routeSidebarCollapsed
+            ? "mapSidebar routeMapSidebar collapsed"
+            : "mapSidebar routeMapSidebar"
+        }
+      >
+        <button
+          className="sidebarCollapseButton"
+          onClick={() => setRouteSidebarCollapsed((prev) => !prev)}
+        >
+          {routeSidebarCollapsed ? "‹" : "›"}
+        </button>
 
-            <div className="sidebarSearch">
-              <input
-                value={sidebarSearch}
-                onChange={(event) => setSidebarSearch(event.target.value)}
-                placeholder="Search..."
-              />
-            </div>
-
-            {pinGroups.length === 0 ? (
-              <div className="sidebarPlaceholder">Nenhum pin encontrado.</div>
-            ) : (
-              <div className="sidebarCategoryList">
-                {pinGroups.map((category) => {
-                  const allHidden =
-                    category.types.length > 0 &&
-                    category.types.every((type) => hiddenPinTypes.includes(type.key));
-
-                  return (
-                    <div className="sidebarCategory" key={category.value}>
-                      <button
-                        className={
-                          allHidden
-                            ? "sidebarCategoryHeader activeHidden"
-                            : "sidebarCategoryHeader"
-                        }
-                        onClick={() => toggleCategoryVisibility(category)}
-                      >
-                        <span>{category.label}</span>
-                        <strong>{category.count}</strong>
-                      </button>
-
-                    <div className="sidebarTypeList">
-                      {category.types.map((type) => {
-                        const typeHidden = hiddenPinTypes.includes(type.key);
-
-                        return (
-                          <button
-                            key={type.key}
-                            className={
-                              typeHidden
-                                ? "sidebarTypeItem hidden"
-                                : "sidebarTypeItem"
-                            }
-                            onClick={() => togglePinTypeVisibility(type.key)}
-                          >
-                            <span className="sidebarTypeIcon">
-                              {type.iconType === "custom" &&
-                              type.iconImageUrl ? (
-                                <img src={type.iconImageUrl} alt={type.label} />
-                              ) : (
-                                type.icon || "📍"
-                              )}
-                            </span>
-
-                            <span>{type.label}</span>
-                            <strong>{type.count}</strong>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-              </div>
-            )}
-
-            <div className="sidebarSection">
-              <h3>Rotas</h3>
-
-              <div className="sidebarPlaceholder">
-                Lista de rotas vai aparecer aqui.
-              </div>
-            </div>
-          </>
+        {!routeSidebarCollapsed && (
+          <RouteSidebarContent
+            routes={routes}
+            filteredRoutes={filteredRoutes}
+            hiddenRouteIds={hiddenRouteIds}
+            selectedRoute={selectedRoute}
+            routeSearch={routeSearch}
+            routeEffectsEnabled={routeEffectsEnabled}
+            labels={{
+              title: t("route.title"),
+              count: t("route.count"),
+              showAll: t("actions.showAll"),
+              hideAll: t("actions.hideAll"),
+              effectOn: t("route.effectOn"),
+              effectOff: t("route.effectOff"),
+              search: t("route.search"),
+              manage: t("actions.orderRoutes"),
+              empty: t("route.empty"),
+              showRoute: t("route.show"),
+              hideRoute: t("route.hide"),
+              noDescription: t("common.noDescription"),
+            }}
+            onSearchChange={setRouteSearch}
+            onShowAll={showAllRoutes}
+            onHideAll={hideAllRoutes}
+            onToggleEffects={() => setRouteEffectsEnabled((prev) => !prev)}
+            onSelectRoute={selectRouteFromList}
+            onToggleRouteVisibility={toggleRouteVisibility}
+          />
         )}
       </aside>
 
-      <header className="topbar">
+      <header className="topbar editorTopbar publicTopbar">
         <div>
           <h1>{mapData.title}</h1>
-          <p>Visualização pública</p>
+          <p>{t("map.publicView")}</p>
         </div>
 
         <div className="topbarActions">
+          <div className="headerStats" aria-label="Estatisticas do mapa">
+            <span>
+              {t("stats.pins")}
+              <strong>{pins.length}</strong>
+            </span>
+
+            <span>
+              {t("stats.editors")}
+              <strong>0</strong>
+            </span>
+
+            <span>
+              {t("stats.categories")}
+              <strong>{pinTypes.length}</strong>
+            </span>
+
+            <span>
+              {t("stats.routes")}
+              <strong>{routes.length}</strong>
+            </span>
+          </div>
+
+          <div className="headerMainActions">
           <span>{pins.length} pins</span>
 
           <Link className="backLink" href="/">
-            Dashboard
+            {t("actions.dashboard")}
           </Link>
+          </div>
 
-          <button onClick={() => setRouteEffectsEnabled((prev) => !prev)}>
-            {routeEffectsEnabled ? "Efeitos ON" : "Efeitos OFF"}
-          </button>
+          <div className="headerSettings">
+            <MapLanguageSelect locale={locale} onLocaleChange={setLocale} />
+          </div>
         </div>
 
         <select
@@ -401,7 +502,7 @@ export default function PublicMapPage() {
           value={categoryFilter}
           onChange={(event) => setCategoryFilter(event.target.value)}
         >
-          <option value="all">Todas categorias</option>
+          <option value="all">{t("categories.all")}</option>
           {CATEGORIES.map((category) => (
             <option key={category.value} value={category.value}>
               {category.label}
@@ -413,24 +514,71 @@ export default function PublicMapPage() {
       <section className="mapArea">
         <TransformWrapper
           initialScale={1}
-          minScale={0.5}
-          maxScale={5}
-          wheel={{ step: 0.001 }}
+          minScale={0.2}
+          maxScale={4}
+          wheel={{
+            step: 0.002,
+            smoothStep: 0.006,
+          }}
           doubleClick={{ disabled: true }}
+          limitToBounds={false}
+          centerOnInit={true}
+          centerZoomedOut={false}
+          zoomAnimation={{
+            disabled: false,
+            animationTime: 80,
+            size: 0.15,
+          }}
+          alignmentAnimation={{ disabled: true }}
+          velocityAnimation={{ disabled: true }}
         >
-          {({ zoomIn, zoomOut, resetTransform }) => (
+          {({ zoomIn, zoomOut, resetTransform, setTransform }) => {
+            function centerMap() {
+              const wrapper = document.querySelector(".transformWrapper");
+              const content = document.querySelector(".imageWrapper");
+
+              if (!wrapper || !content) return;
+
+              const scale = 1;
+              const x = (wrapper.clientWidth - content.offsetWidth * scale) / 2;
+              const y = (wrapper.clientHeight - content.offsetHeight * scale) / 2;
+
+              setTransform(x, y, scale, 200);
+            }
+
+            return (
             <>
-              <div className="controls">
-                <button onClick={() => zoomIn()}>+</button>
-                <button onClick={() => zoomOut()}>-</button>
-                <button onClick={() => resetTransform()}>Reset</button>
+              <div
+                className={
+                  routeSidebarCollapsed
+                    ? "mapControls"
+                    : "mapControls mapControlsWithRouteSidebar"
+                }
+              >
+                <button onClick={() => zoomIn()} title={t("map.zoomIn")}>
+                  +
+                </button>
+
+                <button onClick={() => zoomOut()} title={t("map.zoomOut")}>
+                  -
+                </button>
+
+                <button onClick={centerMap} title={t("map.center")}>
+                  🎯
+                </button>
               </div>
 
               <TransformComponent
                 wrapperClass="transformWrapper"
                 contentClass="transformContent"
+                wrapperStyle={{ background: "#0b0b10" }}
               >
-                <div className="imageWrapper">
+                <div
+                  className="imageWrapper"
+                  onMouseDown={handleMapMouseDown}
+                  onMouseUp={handleMapMouseUp}
+                  onMouseMove={handleMapMouseMove}
+                >
                   <img
                     src={mapData.imageUrl}
                     alt={mapData.title}
@@ -502,105 +650,72 @@ export default function PublicMapPage() {
                       {renderPinIcon(pin)}
                     </button>
                   ))}
+
+                  {selectedPin && pinPopupPosition && (
+                    <div
+                      className="pinInfoPopup mapAttachedPopup"
+                      style={{
+                        left: `${pinPopupPosition.x}%`,
+                        top: `${pinPopupPosition.y}%`,
+                      }}
+                      onMouseDown={(event) => event.stopPropagation()}
+                      onMouseUp={(event) => event.stopPropagation()}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onPointerUp={(event) => event.stopPropagation()}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <button
+                        className="pinPopupClose"
+                        onClick={() => {
+                          setSelectedPin(null);
+                          setPinPopupPosition(null);
+                        }}
+                      >
+                        ×
+                      </button>
+
+                      <div className="pinPopupHeader">
+                        <div className="pinPopupIcon">{renderPinIcon(selectedPin)}</div>
+
+                        <div className="pinPopupTitle">
+                          {selectedPin.name || t("common.noName")}
+                        </div>
+                      </div>
+
+                      {selectedPin.description ? (
+                        <div className="pinPopupDescription">
+                          {selectedPin.description}
+                        </div>
+                      ) : (
+                        <div className="pinPopupDescription emptyText">
+                          {t("common.noDescription")}
+                        </div>
+                      )}
+
+                      <div className="pinPopupMeta">
+                        <div>
+                          <strong>{t("common.group")}:</strong>{" "}
+                          {pinGroups.find(
+                            (group) =>
+                              group.value === (selectedPin.category || "geral")
+                          )?.label || "—"}
+                        </div>
+
+                        <div>
+                          <strong>{t("common.category")}:</strong>{" "}
+                          {selectedPin.typeName || selectedPin.name}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </TransformComponent>
             </>
-          )}
+            );
+          }}
         </TransformWrapper>
       </section>
 
-      {routes.length > 0 && (
-        <div className="routeSidebar">
-          <h3>Rotas</h3>
-
-          {routes.map((route) => {
-            const isHidden = hiddenRouteIds.includes(route._id);
-            const isSelected = selectedRoute?._id === route._id;
-
-            return (
-              <div
-                className={
-                  isSelected ? "routeSidebarItem selected" : "routeSidebarItem"
-                }
-                key={route._id}
-              >
-                <button
-                  className="routeNameButton"
-                  onClick={() => selectRouteFromList(route)}
-                  title={route.name}
-                >
-                  <span
-                    className="routeColorDot"
-                    style={{ background: route.color || "#ef4444" }}
-                  />
-
-                  <span className={isHidden ? "routeHiddenText" : ""}>
-                    {route.name}
-                  </span>
-                </button>
-
-                <div className="routeSidebarActions">
-                  <button onClick={() => toggleRouteVisibility(route._id)}>
-                    {isHidden ? "Mostrar" : "Ocultar"}
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {selectedPin && (
-        <div className="popup">
-          <button className="closeButton" onClick={() => setSelectedPin(null)}>
-            ×
-          </button>
-
-          <div className="popupIcon">{renderPinIcon(selectedPin)}</div>
-
-          <h2>{selectedPin.name}</h2>
-
-          {selectedPin.description ? (
-            <p>{selectedPin.description}</p>
-          ) : (
-            <p className="emptyText">Sem descrição.</p>
-          )}
-
-          <div className="pinCategory">
-            Grupo:{" "}
-            {pinCategories.find(
-              (category) => category.value === (selectedPin.category || "geral")
-            )?.label || "Geral"}
-          </div>
-
-          <div className="pinCategory">
-            Categoria: {selectedPin.typeName || selectedPin.name}
-          </div>
-
-          <div className="coords">
-            X: {selectedPin.x.toFixed(2)}% | Y: {selectedPin.y.toFixed(2)}%
-          </div>
-        </div>
-      )}
-
-      {selectedRoute && (
-        <div className="popup">
-          <button
-            className="closeButton"
-            onClick={() => setSelectedRoute(null)}
-          >
-            ×
-          </button>
-
-          <h2>{selectedRoute.name}</h2>
-
-          <p className="emptyText">
-            {selectedRoute.points.length} pontos nesta rota.
-          </p>
-        </div>
-      )}
-
-      
     </main>
   );
 }
