@@ -10,15 +10,15 @@ import "../page.css";
 const PAYMENT_PLANS = {
   supporter_lifetime: {
     title: "Supporter",
-    price: "$19.99",
+    price: "R$19,99",
   },
   map_slots_5: {
     title: "Map slots",
-    price: "$4.99",
+    price: "R$4,99",
   },
   custom_icon_slots_10: {
     title: "Custom icon slots",
-    price: "$2.99",
+    price: "R$2,99",
   },
 };
 
@@ -202,7 +202,7 @@ export default function SupportPage() {
           </div>
 
           <div className="supportPurchaseAside">
-            <strong>$19.99</strong>
+            <strong>R$19,99</strong>
             <span>Lifetime</span>
             <button
               disabled={hasSupporter}
@@ -239,7 +239,7 @@ export default function SupportPage() {
             </ul>
 
             <div className="supportCardFooter">
-              <strong>$4.99</strong>
+              <strong>R$4,99</strong>
               <span>+5 map slots</span>
               <button onClick={() => openPaymentModal("map_slots_5")}>
                 Buy slots
@@ -274,7 +274,7 @@ export default function SupportPage() {
             </ul>
 
             <div className="supportCardFooter">
-              <strong>$2.99</strong>
+              <strong>R$2,99</strong>
               <span>+10 icon slots</span>
               <button onClick={() => openPaymentModal("custom_icon_slots_10")}>
                 Buy slots
