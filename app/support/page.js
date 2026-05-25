@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { signIn, useSession } from "next-auth/react";
 import SiteFooter from "../components/SiteFooter";
 import SiteHeader from "../components/SiteHeader";
@@ -22,6 +22,8 @@ const PAYMENT_PLANS = {
   },
 };
 const PROCESSED_PAYPAL_ORDERS_KEY = "processedPayPalOrders";
+const PAYPAL_STATUS_CHECK_INTERVAL = 2500;
+const PAYPAL_STATUS_FETCH_TIMEOUT = 10000;
 
 function getProcessedPayPalOrders() {
   try {
@@ -44,6 +46,27 @@ function markPayPalOrderProcessed(paypalOrderId) {
   }
 }
 
+async function fetchJsonWithTimeout(url, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    PAYPAL_STATUS_FETCH_TIMEOUT
+  );
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    const data = await response.json();
+
+    return { response, data };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export default function SupportPage() {
   const { data: session, status, update } = useSession();
   const hasSupporter = session?.user?.supporter === true;
@@ -54,6 +77,8 @@ export default function SupportPage() {
   const [paymentStatus, setPaymentStatus] = useState("");
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [paymentResultModal, setPaymentResultModal] = useState(null);
+  const [pendingPayPalOrderId, setPendingPayPalOrderId] = useState("");
+  const paymentStatusCheckRef = useRef(false);
 
   async function refreshUsageAndSession() {
     try {
@@ -87,7 +112,7 @@ export default function SupportPage() {
     }
   }
 
-  async function waitForPaymentConfirmation(paypalOrderId) {
+  async function waitForPaymentConfirmationLegacy(paypalOrderId) {
     const maxAttempts = 24;
 
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -134,6 +159,94 @@ export default function SupportPage() {
     });
     return false;
   }
+
+  async function checkPaymentConfirmation(paypalOrderId) {
+    if (!paypalOrderId || paymentStatusCheckRef.current) return false;
+
+    paymentStatusCheckRef.current = true;
+
+    try {
+      const { response, data } = await fetchJsonWithTimeout(
+        `/api/payments?paypalOrderId=${encodeURIComponent(
+          paypalOrderId
+        )}&t=${Date.now()}`
+      );
+
+      if (response.ok && data.payment?.status === "paid") {
+        setPaymentStatus("Pagamento confirmado com sucesso.");
+        setPaymentResultModal({
+          status: "success",
+          title: "Pagamento concluÃ­do",
+          message:
+            "Seu pagamento foi confirmado e o benefÃ­cio foi aplicado Ã  sua conta.",
+        });
+        setPendingPayPalOrderId("");
+        await refreshUsageAndSession();
+        return true;
+      }
+
+      if (
+        response.ok &&
+        ["denied", "failed", "refunded"].includes(data.payment?.status)
+      ) {
+        const message = "O PayPal nÃ£o confirmou este pagamento.";
+        setPaymentStatus(message);
+        setPaymentResultModal({
+          status: "error",
+          title: "Falha no pagamento",
+          message,
+        });
+        setPendingPayPalOrderId("");
+        return true;
+      }
+    } catch (error) {
+      console.error("Erro ao consultar status do pagamento.", error);
+    } finally {
+      paymentStatusCheckRef.current = false;
+    }
+
+    return false;
+  }
+
+  async function waitForPaymentConfirmation(paypalOrderId) {
+    const maxAttempts = 40;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, PAYPAL_STATUS_CHECK_INTERVAL)
+      );
+
+      const finished = await checkPaymentConfirmation(paypalOrderId);
+
+      if (finished) return true;
+    }
+
+    setPaymentStatus(
+      "Pagamento em processamento. Atualize a pÃ¡gina em alguns instantes para conferir o status."
+    );
+    setPaymentResultModal({
+      status: "processing",
+      title: "Pagamento em processamento",
+      message:
+        "O PayPal ainda estÃ¡ confirmando a compra. VocÃª pode fechar esta janela e conferir o histÃ³rico em alguns instantes.",
+    });
+    return false;
+  }
+
+  useEffect(() => {
+    if (
+      !pendingPayPalOrderId ||
+      !["loading", "processing"].includes(paymentResultModal?.status)
+    ) {
+      return undefined;
+    }
+
+    const intervalId = setInterval(() => {
+      checkPaymentConfirmation(pendingPayPalOrderId);
+    }, PAYPAL_STATUS_CHECK_INTERVAL);
+
+    return () => clearInterval(intervalId);
+  }, [pendingPayPalOrderId, paymentResultModal?.status]);
 
   useEffect(() => {
     let active = true;
@@ -203,6 +316,7 @@ export default function SupportPage() {
     }
 
     markPayPalOrderProcessed(paypalOrderId);
+    setPendingPayPalOrderId(paypalOrderId);
 
     let active = true;
 
@@ -216,12 +330,14 @@ export default function SupportPage() {
       });
 
       try {
-        const response = await fetch("/api/payments/paypal/capture", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ paypalOrderId }),
-        });
-        const data = await response.json();
+        const { response, data } = await fetchJsonWithTimeout(
+          "/api/payments/paypal/capture",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ paypalOrderId }),
+          }
+        );
 
         if (!response.ok) {
           throw new Error(data.error || "Erro ao confirmar pagamento.");
@@ -248,6 +364,7 @@ export default function SupportPage() {
             title: "Pagamento concluído",
             message: "Seu pagamento foi confirmado e o benefício foi aplicado à sua conta.",
           });
+          setPendingPayPalOrderId("");
           await refreshUsageAndSession();
         }
       } catch (error) {
@@ -259,6 +376,7 @@ export default function SupportPage() {
           title: "Falha no pagamento",
           message,
         });
+        setPendingPayPalOrderId("");
       } finally {
         if (active) {
           setPaymentLoading(false);
