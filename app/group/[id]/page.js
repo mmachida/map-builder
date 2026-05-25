@@ -29,9 +29,14 @@ function getMapPreviewUrl(map) {
   return getTileUrl(firstLevel.urlTemplate, x, y);
 }
 
+function getRouteParamValue(value) {
+  if (Array.isArray(value)) return value[0] || "";
+  return String(value || "");
+}
+
 export default function GroupPage() {
   const params = useParams();
-  const groupId = params.id;
+  const groupId = getRouteParamValue(params?.id);
 
   const [maps, setMaps] = useState([]);
   const [ownedMapCount, setOwnedMapCount] = useState(0);
@@ -57,6 +62,8 @@ export default function GroupPage() {
 	const [pendingUnlinkAsset, setPendingUnlinkAsset] = useState(null);
 
   const loadGroup = useCallback(async function loadGroup() {
+    if (!groupId) return;
+
     try {
       const mapsResponse = await fetch(`/api/groups/${groupId}/maps`);
       const mapsData = await mapsResponse.json();

@@ -45,9 +45,14 @@ function getBrowserMapTitle(title) {
   return `${cleanTitle.slice(0, MAP_BROWSER_TITLE_MAX_LENGTH - 3).trim()}...`;
 }
 
+function getRouteParamValue(value) {
+  if (Array.isArray(value)) return value[0] || "";
+  return String(value || "");
+}
+
 export default function PublicMapPage() {
   const params = useParams();
-  const mapId = params.id;
+  const mapId = getRouteParamValue(params?.id);
   const [activeMapId, setActiveMapId] = useState(mapId);
   const { locale, setLocale, t } = useMapLocale();
 
@@ -110,6 +115,12 @@ export default function PublicMapPage() {
     { value: "item", label: "Item" },
     { value: "segredo", label: "Segredo" },
   ];
+
+  useEffect(() => {
+    if (mapId && mapId !== activeMapId) {
+      setActiveMapId(mapId);
+    }
+  }, [mapId, activeMapId]);
 
   const filteredPins = pins.filter((pin) => {
     const typeKey = getPinIconKey(pin);
@@ -263,6 +274,8 @@ export default function PublicMapPage() {
 
   useEffect(() => {
     async function loadMapAndPins() {
+      if (!activeMapId) return;
+
       setLoaded(false);
       setSelectedPin(null);
       setSelectedRoute(null);

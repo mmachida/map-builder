@@ -127,9 +127,14 @@ function getPublicUsername(value, fallback = "USER") {
   return username.slice(0, 15);
 }
 
+function getRouteParamValue(value) {
+  if (Array.isArray(value)) return value[0] || "";
+  return String(value || "");
+}
+
 export default function EditorPage() {
   const params = useParams();
-  const mapId = params.id;
+  const mapId = getRouteParamValue(params?.id);
   const { locale, setLocale, t } = useMapLocale();
 
   const [mapData, setMapData] = useState(null);
@@ -505,6 +510,8 @@ export default function EditorPage() {
 
   useEffect(() => {
     async function loadMapAndPins() {
+      if (!mapId) return;
+
       try {
         const mapResponse = await fetch(`/api/maps/${mapId}`);
         const mapDataResult = await mapResponse.json();
