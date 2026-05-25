@@ -8,20 +8,20 @@ const LOGIN_PROVIDERS = [
   {
     id: "google",
     label: "Google",
-    icon: "/api/site-icons/banner_google",
+    icon: "/site-icons/banner_google.png",
     enabled: true,
   },
   {
     id: "steam",
     label: "Steam",
-    icon: "/api/site-icons/banner_steam",
+    icon: "/site-icons/banner_steam.png",
     enabled: true,
     href: "/api/auth/steam",
   },
   {
     id: "discord",
     label: "Discord",
-    icon: "/api/site-icons/banner_discord",
+    icon: "/site-icons/banner_discord.png",
     enabled: true,
   },
 ];
@@ -127,11 +127,11 @@ export default function AccountMenu() {
             }
           >
             <Link href="/settings" onClick={() => setMenuOpen(false)}>
-              <img src="/api/site-icons/cog_settings_2" alt="" />
+              <img src="/site-icons/cog_settings_2.svg" alt="" />
               Configurações
             </Link>
             <button onClick={() => signOut()}>
-              <img src="/api/site-icons/leave_settings" alt="" />
+              <img src="/site-icons/leave_settings.svg" alt="" />
               <span>Sair</span>
             </button>
           </div>

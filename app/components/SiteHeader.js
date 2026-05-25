@@ -23,7 +23,7 @@ export default function SiteHeader() {
         <Link className="siteBrand" href="/">
           <img
             className="siteBrandLogo"
-            src="/api/site-icons/site_logo"
+            src="/site-icons/site-logo.svg"
             alt=""
             aria-hidden="true"
           />

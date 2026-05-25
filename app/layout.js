@@ -29,8 +29,8 @@ export const metadata = {
   },
   description: "Create interactive maps for game worlds.",
   icons: {
-    icon: [{ url: "/api/site-icons/site_logo", type: "image/svg+xml" }],
-    shortcut: [{ url: "/api/site-icons/site_logo", type: "image/svg+xml" }],
-    apple: [{ url: "/api/site-icons/site_logo", type: "image/svg+xml" }],
+    icon: [{ url: "/site-icons/site-logo.svg", type: "image/svg+xml" }],
+    shortcut: [{ url: "/site-icons/site-logo.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/site-icons/site-logo.svg", type: "image/svg+xml" }],
   },
 };

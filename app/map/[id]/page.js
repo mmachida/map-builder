@@ -1237,7 +1237,7 @@ ${segments}
                     aria-label="Connected maps"
                     className="mapConnectedControlButton"
                   >
-                    <img src="/api/site-icons/map_connected_icon" alt="" />
+                    <img src="/site-icons/map_connected_icon.svg" alt="" />
                   </button>
 
                 <button onClick={centerMap} title={t("map.center")}>
@@ -1258,7 +1258,7 @@ ${segments}
                               )
                             }
                           >
-                            <img src="/api/site-icons/map_connected" alt="" />
+                            <img src="/site-icons/map_connected.svg" alt="" />
                             <span>{connectedMap.title || "Untitled map"}</span>
                           </button>
                         ))

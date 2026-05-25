@@ -113,7 +113,8 @@ function getDefaultIconOption(icon) {
 }
 
 function isDefaultPinIconImageUrl(iconImageUrl) {
-  return String(iconImageUrl || "").includes("/api/pin-icons/");
+  const url = String(iconImageUrl || "");
+  return url.includes("/api/pin-icons/") || url.includes("/pin-icons/");
 }
 
 function getPublicUsername(value, fallback = "USER") {
@@ -4570,11 +4571,11 @@ ${segments}
             }}
           >
             <button type="button" onClick={openMapSettings}>
-              <img src="/api/site-icons/cog_settings_2" alt="" />
+              <img src="/site-icons/cog_settings_2.svg" alt="" />
               Configurações do mapa
             </button>
             <button type="button" onClick={openActivityLog}>
-              <img src="/api/site-icons/book_settings" alt="" />
+              <img src="/site-icons/book_settings.svg" alt="" />
               Log History
             </button>
           </div>,
@@ -5226,7 +5227,7 @@ ${segments}
                       aria-haspopup="menu"
                       aria-expanded={headerConfigMenuOpen}
                     >
-                      <img src="/api/site-icons/cog_settings" alt="" />
+                      <img src="/site-icons/cog_settings.svg" alt="" />
                     </button>
 
                   </div>
@@ -5355,7 +5356,7 @@ ${segments}
                       aria-label="Connected maps"
                       className="mapConnectedControlButton"
                     >
-                      <img src="/api/site-icons/map_connected_icon" alt="" />
+                      <img src="/site-icons/map_connected_icon.svg" alt="" />
                     </button>
 
                     <button onClick={centerMap} title={t("map.center")}>
@@ -5372,7 +5373,7 @@ ${segments}
                               key={connectedMap._id}
                               onClick={() => openConnectedEditorMap(connectedMap._id)}
                             >
-                              <img src="/api/site-icons/map_connected" alt="" />
+                              <img src="/site-icons/map_connected.svg" alt="" />
                               <span>{connectedMap.title || "Untitled map"}</span>
                             </button>
                           ))
