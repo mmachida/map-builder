@@ -1,6 +1,13 @@
 import { getServerSession } from "next-auth";
 import clientPromise from "@/lib/mongodb";
 import { authOptions } from "@/lib/auth";
+import { getOwnerQuery } from "@/lib/ownership";
+import { stripPrivateAccountFields } from "@/lib/publicData";
+import { getAccountLimits } from "@/lib/accountLimits";
+
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 export async function GET() {
   try {
@@ -15,15 +22,13 @@ export async function GET() {
 
     const assets = await db
       .collection("assets")
-      .find({
-        ownerEmail: session.user.email,
-      })
+      .find(getOwnerQuery(session))
       .sort({ createdAt: -1 })
       .toArray();
 
     return Response.json({
       assets: assets.map((asset) => ({
-        ...asset,
+        ...stripPrivateAccountFields(asset),
         _id: asset._id.toString(),
         linkedGroupIds: asset.linkedGroupIds || [],
       })),
@@ -50,8 +55,9 @@ export async function POST(request) {
     }
 
     const body = await request.json();
+    const assetName = body.name?.trim();
 
-    if (!body.name?.trim()) {
+    if (!assetName) {
       return Response.json({ error: "Nome obrigatório." }, { status: 400 });
     }
 
@@ -60,9 +66,11 @@ export async function POST(request) {
     }
 
     const newAsset = {
+      ownerUserId: session.user.userId,
+      ownerUsername: session.user.username || "USER",
       ownerEmail: session.user.email,
-      ownerName: session.user.name,
-      name: body.name.trim(),
+      ownerName: session.user.username || "USER",
+      name: assetName,
       imageUrl: body.imageUrl,
       type: "pin_icon",
       linkedGroupIds: body.linkedGroupIds || [],
@@ -71,12 +79,38 @@ export async function POST(request) {
 
     const client = await clientPromise;
     const db = client.db(process.env.MONGODB_DB);
+    const [assetCount, account] = await Promise.all([
+      db.collection("assets").countDocuments(getOwnerQuery(session)),
+      db.collection("accounts").findOne({ user_id: session.user.userId }),
+    ]);
+    const accountLimits = getAccountLimits(account);
+
+    if (assetCount >= accountLimits.customIcons) {
+      return Response.json(
+        {
+          error: `Limite de icones personalizados atingido (${assetCount}/${accountLimits.customIcons}).`,
+        },
+        { status: 403 }
+      );
+    }
+
+    const existingAsset = await db.collection("assets").findOne({
+      ...getOwnerQuery(session),
+      name: { $regex: `^${escapeRegExp(assetName)}$`, $options: "i" },
+    });
+
+    if (existingAsset) {
+      return Response.json(
+        { error: "Ja existe um icone customizado com esse nome." },
+        { status: 400 }
+      );
+    }
 
     const result = await db.collection("assets").insertOne(newAsset);
 
     return Response.json({
       asset: {
-        ...newAsset,
+        ...stripPrivateAccountFields(newAsset),
         _id: result.insertedId.toString(),
       },
     });
