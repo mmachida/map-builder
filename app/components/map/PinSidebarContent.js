@@ -1,5 +1,7 @@
 "use client";
 
+import { DEFAULT_PIN_ICON_URL } from "@/lib/constants/icons";
+
 export default function PinSidebarContent({
   title,
   subtitle,
@@ -98,7 +100,7 @@ export default function PinSidebarContent({
 
                     return (
                       <button
-                        key={type.key}
+                        key={`${type.key}:${type.pinTypeId || type.label}`}
                         className={
                           typeHidden
                             ? "sidebarTypeItem hidden"
@@ -109,8 +111,10 @@ export default function PinSidebarContent({
                         <span className="sidebarTypeIcon">
                           {type.iconType === "custom" && type.iconImageUrl ? (
                             <img src={type.iconImageUrl} alt={type.label} />
+                          ) : !type.icon ? (
+                            <img src={DEFAULT_PIN_ICON_URL} alt={type.label} />
                           ) : (
-                            type.icon || "📍"
+                            type.icon
                           )}
                         </span>
 

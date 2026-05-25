@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 export default function RouteSidebarContent({
   routes,
   filteredRoutes,
@@ -15,9 +17,17 @@ export default function RouteSidebarContent({
   onHideAll,
   onToggleEffects,
   onManageRoutes,
+  onExportTxtRoutes,
+  onExportLivesplitRoutes,
   onSelectRoute,
   onToggleRouteVisibility,
+  selectedRouteDescriptionValue,
+  routeDescriptionMaxLength,
+  onSelectedRouteDescriptionChange,
+  onSaveSelectedRouteDescription,
+  onCancelSelectedRouteDescription,
 }) {
+  const [activeDescriptionRouteId, setActiveDescriptionRouteId] = useState(null);
   const text = {
     title: "Rotas",
     count: "rota(s)",
@@ -27,12 +37,18 @@ export default function RouteSidebarContent({
     effectOff: "Effect OFF",
     search: "Search routes...",
     manage: "Ordenar Rotas",
+    exportTxt: "Export .txt",
+    exportLivesplit: "Export Livesplit",
     empty: "Nenhuma rota encontrada.",
     showRoute: "Mostrar rota",
     hideRoute: "Ocultar rota",
     noDescription: "Sem descrição.",
     ...labels,
   };
+  text.save ??= "Salvar";
+  text.cancel ??= "Cancelar";
+  const visibleRoutes = routes.filter((route) => !hiddenRouteIds.includes(route._id));
+  const exportDisabled = visibleRoutes.length === 0;
 
   return (
     <>
@@ -47,7 +63,14 @@ export default function RouteSidebarContent({
         <button onClick={onShowAll}>{text.showAll}</button>
         <button onClick={onHideAll}>{text.hideAll}</button>
 
-        <button onClick={onToggleEffects}>
+        <button
+          className={
+            routeEffectsEnabled
+              ? "sidebarActionButton"
+              : "sidebarActionButton activeHidden"
+          }
+          onClick={onToggleEffects}
+        >
           {routeEffectsEnabled ? text.effectOn : text.effectOff}
         </button>
       </div>
@@ -69,6 +92,30 @@ export default function RouteSidebarContent({
           {text.manage}
         </button>
       )}
+
+      <div
+        className={
+          canManage
+            ? "sidebarExportActions"
+            : "sidebarExportActions sidebarExportActionsWithoutManage"
+        }
+      >
+        <button
+          className="sidebarEditButton sidebarHeaderAction"
+          disabled={exportDisabled}
+          onClick={onExportTxtRoutes}
+        >
+          {text.exportTxt}
+        </button>
+
+        <button
+          className="sidebarEditButton sidebarHeaderAction"
+          disabled={exportDisabled}
+          onClick={onExportLivesplitRoutes}
+        >
+          {text.exportLivesplit}
+        </button>
+      </div>
 
       {filteredRoutes.length === 0 ? (
         <div className="sidebarPlaceholder">{text.empty}</div>
@@ -111,11 +158,57 @@ export default function RouteSidebarContent({
                   {isHidden ? "🙈" : "👁️"}
                 </button>
 
-                {isSelected && (
-                  <div className="routeListDescription">
-                    {route.description || text.noDescription}
-                  </div>
-                )}
+                {isSelected &&
+                  (onSelectedRouteDescriptionChange ? (
+                    <div className="routeListDescriptionEditor">
+                      <textarea
+                        className="routeListDescription routeListDescriptionInput"
+                        value={selectedRouteDescriptionValue ?? route.description ?? ""}
+                        maxLength={routeDescriptionMaxLength}
+                        onClick={(event) => event.stopPropagation()}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onFocus={() => setActiveDescriptionRouteId(route._id)}
+                        onChange={(event) =>
+                          onSelectedRouteDescriptionChange(event.target.value)
+                        }
+                        placeholder={text.noDescription}
+                      />
+
+                      {activeDescriptionRouteId === route._id && (
+                        <div
+                          className="routeListDescriptionActions"
+                          onClick={(event) => event.stopPropagation()}
+                          onMouseDown={(event) => event.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            className="routeDescriptionSaveButton"
+                            onClick={() => {
+                              setActiveDescriptionRouteId(null);
+                              onSaveSelectedRouteDescription?.();
+                            }}
+                          >
+                            {text.save}
+                          </button>
+
+                          <button
+                            type="button"
+                            className="routeDescriptionCancelButton"
+                            onClick={() => {
+                              setActiveDescriptionRouteId(null);
+                              onCancelSelectedRouteDescription?.();
+                            }}
+                          >
+                            {text.cancel}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="routeListDescription">
+                      {route.description || text.noDescription}
+                    </div>
+                  ))}
               </div>
             );
           })}

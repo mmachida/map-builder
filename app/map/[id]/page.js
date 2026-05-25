@@ -8,21 +8,72 @@ import "../../page.css";
 import PinSidebarContent from "@/app/components/map/PinSidebarContent";
 import RouteSidebarContent from "@/app/components/map/RouteSidebarContent";
 import MapLanguageSelect from "@/app/components/map/MapLanguageSelect";
+import TiledMapLayer from "@/app/components/map/TiledMapLayer";
+import AccountMenu from "@/app/components/AccountMenu";
 import useMapLocale from "@/app/components/map/useMapLocale";
+import { DEFAULT_PIN_ICON_URL } from "@/lib/constants/icons";
+
+const DEFAULT_MAP_PIN_SIZE = 25;
+const MIN_MAP_PIN_SIZE = 5;
+const DEFAULT_MAP_ROUTE_SIZE = 25;
+const MIN_MAP_ROUTE_SIZE = 5;
+const DEFAULT_MAP_NOTE_SIZE = 25;
+const MIN_MAP_NOTE_SIZE = 5;
+const DEFAULT_ROUTE_WIDTH = 2;
+const MAP_WHEEL_ZOOM_FACTOR = 1.12;
+const MAP_MIN_SCALE = 0.2;
+const MAP_MAX_SCALE = 24;
+const OUTSIDE_MAP_INTERACTION_MARGIN = 500;
+const DEFAULT_MAP_CONTENT_SIZE = { width: 1200, height: 675 };
+const TOAST_DURATION_MS = 3200;
+const TOAST_FADE_MS = 260;
+const MAP_BROWSER_TITLE_MAX_LENGTH = 55;
+
+function getPinBackgroundColor(value) {
+  const color = String(value || "").trim();
+
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? color.toLowerCase() : "#0f1014";
+}
+
+function getBrowserMapTitle(title) {
+  const cleanTitle = String(title || "").trim() || "Interactive Map";
+
+  if (cleanTitle.length <= MAP_BROWSER_TITLE_MAX_LENGTH) {
+    return cleanTitle;
+  }
+
+  return `${cleanTitle.slice(0, MAP_BROWSER_TITLE_MAX_LENGTH - 3).trim()}...`;
+}
 
 export default function PublicMapPage() {
   const params = useParams();
   const mapId = params.id;
+  const [activeMapId, setActiveMapId] = useState(mapId);
   const { locale, setLocale, t } = useMapLocale();
 
   const [mapData, setMapData] = useState(null);
   const [pins, setPins] = useState([]);
+  const [notes, setNotes] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [selectedPin, setSelectedPin] = useState(null);
   const [pinPopupPosition, setPinPopupPosition] = useState(null);
+  const [mapScale, setMapScale] = useState(1);
+  const mapScaleRef = useRef(1);
+  const transformApiRef = useRef(null);
+  const connectedMapsMenuRef = useRef(null);
+  const [isMapPanning, setIsMapPanning] = useState(false);
+  const [mapPinSize, setMapPinSize] = useState(DEFAULT_MAP_PIN_SIZE);
+  const [mapRouteSize, setMapRouteSize] = useState(DEFAULT_MAP_ROUTE_SIZE);
+  const [mapNoteSize, setMapNoteSize] = useState(DEFAULT_MAP_NOTE_SIZE);
+  const [mapContentSize, setMapContentSize] = useState(DEFAULT_MAP_CONTENT_SIZE);
   const [mapMouseDownPoint, setMapMouseDownPoint] = useState(null);
   const mapMouseDownPointRef = useRef(null);
   const mapDragRef = useRef(false);
+  const [activityStatus, setActivityStatus] = useState(null);
+  const [activityStatusClosing, setActivityStatusClosing] = useState(false);
+  const activityStatusTimeoutRef = useRef(null);
+  const activityStatusFadeTimeoutRef = useRef(null);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
 
   const [categoryFilter, setCategoryFilter] = useState("all");
 
@@ -30,6 +81,8 @@ export default function PublicMapPage() {
   const [selectedRoute, setSelectedRoute] = useState(null);
   const [hoveredRouteId, setHoveredRouteId] = useState(null);
   const [hiddenRouteIds, setHiddenRouteIds] = useState([]);
+  const [connectedMaps, setConnectedMaps] = useState([]);
+  const [connectedMapsOpen, setConnectedMapsOpen] = useState(false);
 
   const [routeEffectsEnabled, setRouteEffectsEnabled] = useState(() => {
     if (typeof window === "undefined") return true;
@@ -76,10 +129,150 @@ export default function PublicMapPage() {
     route.name.toLowerCase().includes(routeSearch.toLowerCase())
   );
 
+  const mapEditorsCount = (() => {
+    const editorKeys = new Set();
+    const ownerKey = mapData?.ownerUsername || mapData?.ownerName;
+
+    if (ownerKey) {
+      editorKeys.add(`owner:${ownerKey}`);
+    }
+
+    const editors = Array.isArray(mapData?.editors) ? mapData.editors : [];
+
+    editors.forEach((editor) => {
+      const key =
+        editor.userId ||
+        editor.user_id ||
+        editor.username ||
+        editor.name;
+
+      if (key) {
+        editorKeys.add(`editor:${key}`);
+      }
+    });
+
+    return Math.max(1, editorKeys.size);
+  })();
+
+  const routeLayerMarginX =
+    (OUTSIDE_MAP_INTERACTION_MARGIN / mapContentSize.width) * 100;
+  const routeLayerMarginY =
+    (OUTSIDE_MAP_INTERACTION_MARGIN / mapContentSize.height) * 100;
+  const routeLayerViewBox = [
+    -routeLayerMarginX,
+    -routeLayerMarginY,
+    100 + routeLayerMarginX * 2,
+    100 + routeLayerMarginY * 2,
+  ].join(" ");
+
+  function getRouteDisplayWidth(width) {
+    const routeSize = Math.max(MIN_MAP_ROUTE_SIZE, mapRouteSize);
+    return Math.max(0.2, Number(width || DEFAULT_ROUTE_WIDTH) * (routeSize / 100));
+  }
+
+  function getRouteDashArray() {
+    const routeSize = Math.max(MIN_MAP_ROUTE_SIZE, mapRouteSize);
+    const sizeRatio = routeSize / 100;
+    const dash = Math.max(0.5, 8 * sizeRatio);
+    const gap = Math.max(0.4, 6 * sizeRatio);
+    return `${dash} ${gap}`;
+  }
+
+  function getRouteDashDistance() {
+    const routeSize = Math.max(MIN_MAP_ROUTE_SIZE, mapRouteSize);
+    const sizeRatio = routeSize / 100;
+    const dash = Math.max(0.5, 8 * sizeRatio);
+    const gap = Math.max(0.4, 6 * sizeRatio);
+    return dash + gap;
+  }
+
+  function getPinZoomScale() {
+    const zoom = Math.max(MAP_MIN_SCALE, mapScale);
+    return Math.max(0.42, Math.min(1.75, 1 / Math.pow(zoom, 0.34)));
+  }
+
+  function updateMapScale(nextScale) {
+    const scale = Number(nextScale) || 1;
+
+    if (Math.abs(scale - mapScaleRef.current) < 0.01) return;
+
+    mapScaleRef.current = scale;
+    setMapScale(scale);
+  }
+
+  function centerMapAtPoint(point, animationTime = 180) {
+    if (!point || !transformApiRef.current?.setTransform) return;
+
+    const wrapper = document.querySelector(".transformWrapper");
+    const content = document.querySelector(".imageWrapper");
+
+    if (!wrapper || !content) return;
+
+    const scale = transformApiRef.current.state?.scale || mapScaleRef.current || 1;
+    const x = wrapper.clientWidth / 2 - content.offsetWidth * (point.x / 100) * scale;
+    const y = wrapper.clientHeight / 2 - content.offsetHeight * (point.y / 100) * scale;
+
+    transformApiRef.current.setTransform(x, y, scale, animationTime);
+  }
+
+  function getRouteCenterPoint(route) {
+    const points = Array.isArray(route?.points) ? route.points : [];
+
+    if (points.length === 0) return null;
+
+    const xs = points.map((point) => Number(point.x)).filter(Number.isFinite);
+    const ys = points.map((point) => Number(point.y)).filter(Number.isFinite);
+
+    if (xs.length === 0 || ys.length === 0) return null;
+
+    return {
+      x: (Math.min(...xs) + Math.max(...xs)) / 2,
+      y: (Math.min(...ys) + Math.max(...ys)) / 2,
+    };
+  }
+
+  function centerMapOnRoute(route) {
+    const point = getRouteCenterPoint(route);
+
+    if (point) {
+      centerMapAtPoint(point);
+    }
+  }
+
+  function centerMapOnPin(pin) {
+    if (!pin) return;
+
+    centerMapAtPoint({
+      x: Number(pin.x),
+      y: Number(pin.y),
+    });
+  }
+
+  function resetMapView(animationTime = 160) {
+    const wrapper = document.querySelector(".transformWrapper");
+    const content = document.querySelector(".imageWrapper");
+
+    if (!wrapper || !content || !transformApiRef.current?.setTransform) return;
+
+    const scale = 1;
+    const x = (wrapper.clientWidth - content.offsetWidth * scale) / 2;
+    const y = (wrapper.clientHeight - content.offsetHeight * scale) / 2;
+
+    transformApiRef.current.setTransform(x, y, scale, animationTime);
+  }
+
   useEffect(() => {
     async function loadMapAndPins() {
+      setLoaded(false);
+      setSelectedPin(null);
+      setSelectedRoute(null);
+      setPinPopupPosition(null);
+      setHiddenRouteIds([]);
+      setHoveredRouteId(null);
+      setConnectedMapsOpen(false);
+
       try {
-        const mapResponse = await fetch(`/api/maps/${mapId}`);
+        const mapResponse = await fetch(`/api/maps/${activeMapId}`);
         const mapResult = await mapResponse.json();
 
         if (!mapResponse.ok) {
@@ -88,6 +281,28 @@ export default function PublicMapPage() {
         }
 
         setMapData(mapResult.map);
+        setMapPinSize(
+          Math.max(MIN_MAP_PIN_SIZE, mapResult.map.pinSize ?? DEFAULT_MAP_PIN_SIZE)
+        );
+        setMapRouteSize(
+          Math.max(
+            MIN_MAP_ROUTE_SIZE,
+            mapResult.map.routeSize ?? DEFAULT_MAP_ROUTE_SIZE
+          )
+        );
+        setMapNoteSize(
+          Math.max(
+            MIN_MAP_NOTE_SIZE,
+            mapResult.map.noteSize ?? DEFAULT_MAP_NOTE_SIZE
+          )
+        );
+
+        if (typeof mapResult.map.routeEffectsEnabled === "boolean") {
+          setRouteEffectsEnabled(mapResult.map.routeEffectsEnabled);
+        }
+
+        setLoaded(true);
+        window.setTimeout(() => resetMapView(), 0);
 
         if (mapResult.map.groupId) {
           const categoriesResponse = await fetch(
@@ -111,29 +326,81 @@ export default function PublicMapPage() {
           }
         }
 
-        const pinsResponse = await fetch(`/api/maps/${mapId}/pins`);
+        const pinsResponse = await fetch(`/api/maps/${activeMapId}/pins`);
         const pinsResult = await pinsResponse.json();
 
         if (pinsResponse.ok) {
           setPins(pinsResult.pins || []);
         }
 
-        const routesResponse = await fetch(`/api/maps/${mapId}/routes`);
+        const routesResponse = await fetch(`/api/maps/${activeMapId}/routes`);
         const routesResult = await routesResponse.json();
 
         if (routesResponse.ok) {
           setRoutes(routesResult.routes || []);
         }
+
+        const notesResponse = await fetch(`/api/maps/${activeMapId}/notes`);
+        const notesResult = await notesResponse.json();
+
+        if (notesResponse.ok) {
+          setNotes(notesResult.notes || []);
+        }
+
+        const connectedResponse = await fetch(`/api/maps/${activeMapId}/connected`);
+        const connectedResult = await connectedResponse.json();
+
+        if (connectedResponse.ok) {
+          setConnectedMaps(connectedResult.maps || []);
+        } else {
+          setConnectedMaps([]);
+        }
       } catch (error) {
         console.error(error);
         setMapData(null);
+        setConnectedMaps([]);
       } finally {
         setLoaded(true);
       }
     }
 
     loadMapAndPins();
-  }, [mapId]);
+  }, [activeMapId]);
+
+  useEffect(() => {
+    document.title = `${getBrowserMapTitle(mapData?.title)} - Map Builder`;
+  }, [mapData?.title]);
+
+  useEffect(() => {
+    function handleBrowserNavigation() {
+      const nextMapId = window.location.pathname.split("/").filter(Boolean).at(-1);
+
+      if (nextMapId) {
+        setActiveMapId(nextMapId);
+      }
+    }
+
+    window.addEventListener("popstate", handleBrowserNavigation);
+
+    return () => {
+      window.removeEventListener("popstate", handleBrowserNavigation);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!connectedMapsOpen) return undefined;
+
+    function closeConnectedMapsMenu(event) {
+      if (connectedMapsMenuRef.current?.contains(event.target)) return;
+      setConnectedMapsOpen(false);
+    }
+
+    document.addEventListener("pointerdown", closeConnectedMapsMenu);
+
+    return () => {
+      document.removeEventListener("pointerdown", closeConnectedMapsMenu);
+    };
+  }, [connectedMapsOpen]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -141,6 +408,71 @@ export default function PublicMapPage() {
       JSON.stringify(routeEffectsEnabled)
     );
   }, [routeEffectsEnabled]);
+
+  useEffect(() => {
+    return () => {
+      if (activityStatusTimeoutRef.current) {
+        clearTimeout(activityStatusTimeoutRef.current);
+      }
+
+      if (activityStatusFadeTimeoutRef.current) {
+        clearTimeout(activityStatusFadeTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  function showMapToast(message) {
+    setActivityStatus(message);
+    setActivityStatusClosing(false);
+
+    if (activityStatusTimeoutRef.current) {
+      clearTimeout(activityStatusTimeoutRef.current);
+    }
+
+    if (activityStatusFadeTimeoutRef.current) {
+      clearTimeout(activityStatusFadeTimeoutRef.current);
+    }
+
+    activityStatusTimeoutRef.current = setTimeout(() => {
+      setActivityStatusClosing(true);
+      activityStatusFadeTimeoutRef.current = setTimeout(() => {
+        setActivityStatus(null);
+        setActivityStatusClosing(false);
+      }, TOAST_FADE_MS);
+    }, TOAST_DURATION_MS);
+  }
+
+  function copyPublicLink() {
+    navigator.clipboard.writeText(`${window.location.origin}/map/${activeMapId}`);
+    showMapToast("Public link copied");
+  }
+
+  function openShareModal() {
+    setSelectedPin(null);
+    setPinPopupPosition(null);
+    setSelectedRoute(null);
+    setShareModalOpen(true);
+  }
+
+  function updateMapContentSize(imageWrapper) {
+    if (!imageWrapper) return;
+
+    const nextWidth = imageWrapper.offsetWidth || imageWrapper.getBoundingClientRect().width;
+    const nextHeight = imageWrapper.offsetHeight || imageWrapper.getBoundingClientRect().height;
+
+    if (!nextWidth || !nextHeight) return;
+
+    setMapContentSize((prev) => {
+      if (prev.width === nextWidth && prev.height === nextHeight) {
+        return prev;
+      }
+
+      return {
+        width: nextWidth,
+        height: nextHeight,
+      };
+    });
+  }
 
   function getPinIconKey(pin) {
     if (pin.iconKey) return pin.iconKey;
@@ -152,6 +484,12 @@ export default function PublicMapPage() {
     return `emoji:${pin.icon || "📍"}`;
   }
 
+  function getPinCategoryColor(pin) {
+    const type = pinTypes.find((pinType) => pinType.iconKey === getPinIconKey(pin));
+
+    return getPinBackgroundColor(type?.backgroundColor);
+  }
+
   function renderPinIcon(pin) {
     if (pin.iconType === "custom" && pin.iconImageUrl) {
       return (
@@ -159,7 +497,77 @@ export default function PublicMapPage() {
       );
     }
 
-    return pin.icon || "📍";
+    if (pin.icon) return pin.icon;
+
+    return <img src={DEFAULT_PIN_ICON_URL} alt={pin.name || "Pin"} className="customPinIcon" />;
+  }
+
+  function getChainRequirementKey(requirement) {
+    return (
+      requirement?.pinId ||
+      requirement?.key ||
+      requirement?.iconKey ||
+      `${requirement?.category || "geral"}:${requirement?.typeName || ""}`
+    );
+  }
+
+  function renderChainRequirementIcon(requirement) {
+    if (requirement.iconType === "custom" && requirement.iconImageUrl) {
+      return <img src={requirement.iconImageUrl} alt={requirement.typeName || "Chain"} />;
+    }
+
+    if (requirement.icon) return requirement.icon;
+
+    return <img src={DEFAULT_PIN_ICON_URL} alt={requirement.typeName || "Chain"} />;
+  }
+
+  function selectChainRequirementPin(requirement) {
+    if (!requirement?.pinId) return;
+
+    const targetPin = pins.find((pin) => pin._id === requirement.pinId);
+
+    if (!targetPin) {
+      showMapToast("Pin requirement not found");
+      return;
+    }
+
+    setSelectedPin(targetPin);
+    setSelectedRoute(null);
+    setPinPopupPosition({
+      x: targetPin.x,
+      y: targetPin.y,
+    });
+    centerMapOnPin(targetPin);
+  }
+
+  function isPortalPin(pin) {
+    return (
+      pin?.systemType === "portal" ||
+      ((pin?.category || "geral") === "system" &&
+        (pin?.typeName || pin?.name) === "Portal")
+    );
+  }
+
+  function teleportToMap(destinationMapId, destinationMapTitle = "destination map") {
+    if (!destinationMapId) {
+      showMapToast("Portal destination not configured");
+      return false;
+    }
+
+    if (destinationMapId === activeMapId) {
+      showMapToast("Already on this map");
+      return true;
+    }
+
+    window.history.pushState(null, "", `/map/${destinationMapId}`);
+    setActiveMapId(destinationMapId);
+    setConnectedMapsOpen(false);
+    showMapToast(`Loading ${destinationMapTitle || "destination map"}`);
+    return true;
+  }
+
+  function openPortalDestination(pin) {
+    return teleportToMap(pin?.destinationMapId, pin?.destinationMapTitle);
   }
 
   function handlePinClick(event, pin) {
@@ -188,6 +596,7 @@ export default function PublicMapPage() {
     setSelectedRoute(route);
     setSelectedPin(null);
     setPinPopupPosition(null);
+    centerMapOnRoute(route);
   }
 
   function toggleRouteVisibility(routeId) {
@@ -207,7 +616,104 @@ export default function PublicMapPage() {
     setSelectedRoute(route);
     setSelectedPin(null);
     setPinPopupPosition(null);
+    centerMapOnRoute(route);
   }
+
+  useEffect(() => {
+    function isTypingTarget(target) {
+      const tagName = target?.tagName?.toLowerCase();
+
+      return (
+        tagName === "input" ||
+        tagName === "textarea" ||
+        tagName === "select" ||
+        target?.isContentEditable
+      );
+    }
+
+    function selectRouteByKeyboard(route) {
+      setSelectedRoute(route);
+      setSelectedPin(null);
+      setPinPopupPosition(null);
+      centerMapOnRoute(route);
+    }
+
+    function selectPinByKeyboard(pin) {
+      setSelectedPin(pin);
+      setSelectedRoute(null);
+      setPinPopupPosition({
+        x: pin.x,
+        y: pin.y,
+      });
+      centerMapOnPin(pin);
+    }
+
+    function handleKeyboardNavigation(event) {
+      if (
+        event.key !== "ArrowLeft" &&
+        event.key !== "ArrowRight" &&
+        event.key !== "ArrowUp" &&
+        event.key !== "ArrowDown"
+      ) {
+        return;
+      }
+      if (isTypingTarget(event.target)) return;
+
+      const direction =
+        event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : -1;
+
+      if (selectedRoute) {
+        const visibleRoutes = orderedRoutes.filter(
+          (route) => !hiddenRouteIds.includes(route._id)
+        );
+        const currentIndex = visibleRoutes.findIndex(
+          (route) => route._id === selectedRoute._id
+        );
+
+        if (visibleRoutes.length === 0 || currentIndex === -1) return;
+
+        event.preventDefault();
+        const nextIndex =
+          (currentIndex + direction + visibleRoutes.length) % visibleRoutes.length;
+        selectRouteByKeyboard(visibleRoutes[nextIndex]);
+        return;
+      }
+
+      if (selectedPin) {
+        const selectedPinKey = getPinIconKey(selectedPin);
+        const categoryPins = pins.filter(
+          (pin) =>
+            getPinIconKey(pin) === selectedPinKey &&
+            !hiddenPinTypes.includes(getPinIconKey(pin))
+        );
+        const currentIndex = categoryPins.findIndex(
+          (pin) => pin._id === selectedPin._id
+        );
+
+        if (categoryPins.length === 0 || currentIndex === -1) return;
+
+        event.preventDefault();
+        const nextIndex =
+          (currentIndex + direction + categoryPins.length) % categoryPins.length;
+        selectPinByKeyboard(categoryPins[nextIndex]);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyboardNavigation);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyboardNavigation);
+    };
+  // Keyboard navigation intentionally reads the latest render state from this scope.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    hiddenPinTypes,
+    hiddenRouteIds,
+    orderedRoutes,
+    pins,
+    selectedPin,
+    selectedRoute,
+  ]);
 
   function clearMapSelection() {
     setSelectedPin(null);
@@ -238,10 +744,13 @@ export default function PublicMapPage() {
 
     if (distance > 4) {
       mapDragRef.current = true;
+      setIsMapPanning(true);
     }
   }
 
   function handleMapMouseUp(event) {
+    setIsMapPanning(false);
+
     const point = mapMouseDownPointRef.current || mapMouseDownPoint;
 
     if (!point) return;
@@ -291,6 +800,7 @@ export default function PublicMapPage() {
           icon: type.icon,
           iconType: type.iconType || "emoji",
           iconImageUrl: type.iconImageUrl || "",
+          backgroundColor: getPinBackgroundColor(type.backgroundColor),
           pinTypeId: type._id,
           count,
           iconKey: type.iconKey,
@@ -357,6 +867,113 @@ export default function PublicMapPage() {
 
   function hideAllRoutes() {
     setHiddenRouteIds(routes.map((route) => route._id));
+  }
+
+  function getRoutesExportBaseName() {
+    return (
+      (mapData?.title || "map")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "") || "map"
+    );
+  }
+
+  function downloadRoutesFile(content, fileName, type) {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = fileName;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function escapeXml(value) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&apos;");
+  }
+
+  function getExportableRoutes() {
+    return orderedRoutes.filter((route) => !hiddenRouteIds.includes(route._id));
+  }
+
+  function exportRoutesTxt() {
+    const exportableRoutes = getExportableRoutes();
+
+    if (exportableRoutes.length === 0) return;
+
+    const content = exportableRoutes
+      .map(
+        (route) =>
+          `T\u00edtulo: ${route.name || "Sem nome"}\nDescri\u00e7\u00e3o: ${
+            route.description || ""
+          }`
+      )
+      .join("\n\n");
+
+    downloadRoutesFile(
+      content,
+      `${getRoutesExportBaseName()}-routes.txt`,
+      "text/plain;charset=utf-8"
+    );
+  }
+
+  function exportRoutesLivesplit() {
+    const exportableRoutes = getExportableRoutes();
+
+    if (exportableRoutes.length === 0) return;
+
+    const segments = exportableRoutes
+      .map(
+        (route) => `    <Segment>
+      <Name>${escapeXml(route.name || "Sem nome")}</Name>
+      <Icon />
+      <SplitTimes>
+        <SplitTime name="Personal Best" />
+      </SplitTimes>
+      <BestSegmentTime />
+      <SegmentHistory />
+    </Segment>`
+      )
+      .join("\n");
+
+    const content = `<?xml version="1.0" encoding="UTF-8"?>
+<Run version="1.7.0">
+  <GameIcon />
+  <GameName>
+  </GameName>
+  <CategoryName>
+  </CategoryName>
+  <LayoutPath>
+  </LayoutPath>
+  <Metadata>
+    <Run id="" />
+    <Platform usesEmulator="False">
+    </Platform>
+    <Region>
+    </Region>
+    <Variables />
+    <CustomVariables />
+  </Metadata>
+  <Offset>00:00:00</Offset>
+  <AttemptCount>0</AttemptCount>
+  <AttemptHistory />
+  <Segments>
+${segments}
+  </Segments>
+  <AutoSplitterSettings />
+</Run>`;
+
+    downloadRoutesFile(
+      content,
+      `${getRoutesExportBaseName()}-livesplit.lss`,
+      "application/xml;charset=utf-8"
+    );
   }
 
   if (!loaded) {
@@ -438,6 +1055,8 @@ export default function PublicMapPage() {
               hideAll: t("actions.hideAll"),
               effectOn: t("route.effectOn"),
               effectOff: t("route.effectOff"),
+              exportTxt: t("route.exportTxt"),
+              exportLivesplit: t("route.exportLivesplit"),
               search: t("route.search"),
               manage: t("actions.orderRoutes"),
               empty: t("route.empty"),
@@ -449,6 +1068,8 @@ export default function PublicMapPage() {
             onShowAll={showAllRoutes}
             onHideAll={hideAllRoutes}
             onToggleEffects={() => setRouteEffectsEnabled((prev) => !prev)}
+            onExportTxtRoutes={exportRoutesTxt}
+            onExportLivesplitRoutes={exportRoutesLivesplit}
             onSelectRoute={selectRouteFromList}
             onToggleRouteVisibility={toggleRouteVisibility}
           />
@@ -470,7 +1091,7 @@ export default function PublicMapPage() {
 
             <span>
               {t("stats.editors")}
-              <strong>0</strong>
+              <strong>{mapEditorsCount}</strong>
             </span>
 
             <span>
@@ -493,7 +1114,15 @@ export default function PublicMapPage() {
           </div>
 
           <div className="headerSettings">
+            <button
+              className="publicLinkButton"
+              onClick={openShareModal}
+            >
+              Share
+            </button>
+
             <MapLanguageSelect locale={locale} onLocaleChange={setLocale} />
+            <AccountMenu />
           </div>
         </div>
 
@@ -511,14 +1140,18 @@ export default function PublicMapPage() {
         </select>
       </header>
 
-      <section className="mapArea">
+      <section
+        className="mapArea"
+        onMouseDown={handleMapMouseDown}
+        onMouseUp={handleMapMouseUp}
+        onMouseMove={handleMapMouseMove}
+      >
         <TransformWrapper
           initialScale={1}
-          minScale={0.2}
-          maxScale={4}
+          minScale={MAP_MIN_SCALE}
+          maxScale={MAP_MAX_SCALE}
           wheel={{
-            step: 0.002,
-            smoothStep: 0.006,
+            disabled: true,
           }}
           doubleClick={{ disabled: true }}
           limitToBounds={false}
@@ -531,8 +1164,18 @@ export default function PublicMapPage() {
           }}
           alignmentAnimation={{ disabled: true }}
           velocityAnimation={{ disabled: true }}
+          onInit={(ref) => {
+            transformApiRef.current = ref;
+            updateMapScale(ref.state.scale);
+          }}
+          onTransform={(ref) => {
+            transformApiRef.current = ref;
+            updateMapScale(ref.state.scale);
+          }}
+          onPanningStart={() => setIsMapPanning(true)}
+          onPanningStop={() => setIsMapPanning(false)}
         >
-          {({ zoomIn, zoomOut, resetTransform, setTransform }) => {
+          {({ zoomIn, zoomOut, resetTransform, setTransform, state }) => {
             function centerMap() {
               const wrapper = document.querySelector(".transformWrapper");
               const content = document.querySelector(".imageWrapper");
@@ -544,6 +1187,30 @@ export default function PublicMapPage() {
               const y = (wrapper.clientHeight - content.offsetHeight * scale) / 2;
 
               setTransform(x, y, scale, 200);
+            }
+
+            function handleWheelZoom(event) {
+              event.preventDefault();
+              event.stopPropagation();
+
+              const wrapper = event.currentTarget;
+              const rect = wrapper.getBoundingClientRect();
+              const direction = event.deltaY < 0 ? 1 : -1;
+              const nextScale =
+                direction > 0
+                  ? Math.min(MAP_MAX_SCALE, state.scale * MAP_WHEEL_ZOOM_FACTOR)
+                  : Math.max(MAP_MIN_SCALE, state.scale / MAP_WHEEL_ZOOM_FACTOR);
+
+              if (nextScale === state.scale) return;
+
+              const mouseX = event.clientX - rect.left;
+              const mouseY = event.clientY - rect.top;
+              const contentX = (mouseX - state.positionX) / state.scale;
+              const contentY = (mouseY - state.positionY) / state.scale;
+              const nextX = mouseX - contentX * nextScale;
+              const nextY = mouseY - contentY * nextScale;
+
+              setTransform(nextX, nextY, nextScale, 0);
             }
 
             return (
@@ -563,33 +1230,79 @@ export default function PublicMapPage() {
                   -
                 </button>
 
+                <div className="mapControlsRow" ref={connectedMapsMenuRef}>
+                  <button
+                    onClick={() => setConnectedMapsOpen((prev) => !prev)}
+                    title="Connected maps"
+                    aria-label="Connected maps"
+                    className="mapConnectedControlButton"
+                  >
+                    <img src="/api/site-icons/map_connected_icon" alt="" />
+                  </button>
+
                 <button onClick={centerMap} title={t("map.center")}>
                   🎯
                 </button>
+                  {connectedMapsOpen && (
+                    <div className="connectedMapsMenu">
+                      {connectedMaps.length === 0 ? (
+                        <span>No connected maps</span>
+                      ) : (
+                        connectedMaps.map((connectedMap) => (
+                          <button
+                            key={connectedMap._id}
+                            onClick={() =>
+                              teleportToMap(
+                                connectedMap._id,
+                                connectedMap.title || "destination map"
+                              )
+                            }
+                          >
+                            <img src="/api/site-icons/map_connected" alt="" />
+                            <span>{connectedMap.title || "Untitled map"}</span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <TransformComponent
                 wrapperClass="transformWrapper"
                 contentClass="transformContent"
                 wrapperStyle={{ background: "#0b0b10" }}
+                wrapperProps={{ onWheel: handleWheelZoom }}
               >
                 <div
-                  className="imageWrapper"
-                  onMouseDown={handleMapMouseDown}
-                  onMouseUp={handleMapMouseUp}
-                  onMouseMove={handleMapMouseMove}
+                  className={isMapPanning ? "imageWrapper mapPanning" : "imageWrapper"}
+                  style={{
+                    "--map-pin-scale": mapPinSize / 50,
+                    "--map-pin-zoom-scale": getPinZoomScale(),
+                    "--map-note-scale": mapNoteSize / 50,
+                  }}
                 >
-                  <img
-                    src={mapData.imageUrl}
-                    alt={mapData.title}
-                    className="mapImage"
-                    draggable="false"
+                  <TiledMapLayer
+                    key={activeMapId}
+                    map={mapData}
+                    scale={mapScale}
+                    onLoad={() => {
+                      updateMapContentSize(document.querySelector(".imageWrapper"));
+                      window.setTimeout(() => resetMapView(), 0);
+                    }}
                   />
 
                   <svg
                     className="routesLayer"
-                    viewBox="0 0 100 100"
+                    viewBox={routeLayerViewBox}
                     preserveAspectRatio="none"
+                    style={{
+                      inset: "auto",
+                      left: -OUTSIDE_MAP_INTERACTION_MARGIN,
+                      top: -OUTSIDE_MAP_INTERACTION_MARGIN,
+                      width: `calc(100% + ${OUTSIDE_MAP_INTERACTION_MARGIN * 2}px)`,
+                      height: `calc(100% + ${OUTSIDE_MAP_INTERACTION_MARGIN * 2}px)`,
+                    }}
                   >
                     {routes
                       .filter((route) => !hiddenRouteIds.includes(route._id))
@@ -604,13 +1317,16 @@ export default function PublicMapPage() {
                           strokeWidth={
                             selectedRoute?._id === route._id ||
                             hoveredRouteId === route._id
-                              ? (route.width || 4) + 1
-                              : route.width || 4
+                              ? getRouteDisplayWidth(route.width || DEFAULT_ROUTE_WIDTH) + 1
+                              : getRouteDisplayWidth(route.width || DEFAULT_ROUTE_WIDTH)
                           }
                           strokeLinecap="round"
                           strokeLinejoin="round"
                           vectorEffect="non-scaling-stroke"
-                          strokeDasharray="8 6"
+                          strokeDasharray={getRouteDashArray()}
+                          style={{
+                            "--route-dash-offset": `-${getRouteDashDistance()}`,
+                          }}
                           className={
                             routeEffectsEnabled &&
                             (selectedRoute?._id === route._id ||
@@ -632,31 +1348,58 @@ export default function PublicMapPage() {
                       ))}
                   </svg>
 
+                  {notes.map((note) => (
+                    <div
+                      key={note._id}
+                      className="mapNote publicMapNote"
+                      style={{
+                        left: `${note.x}%`,
+                        top: `${note.y}%`,
+                        width: `${note.width}%`,
+                        height: `${note.height}%`,
+                      }}
+                      onMouseDown={(event) => event.stopPropagation()}
+                      onMouseMove={(event) => event.stopPropagation()}
+                      onMouseUp={(event) => event.stopPropagation()}
+                      onClick={(event) => event.stopPropagation()}
+                      onWheel={(event) => event.stopPropagation()}
+                    >
+                      {note.title && <strong>{note.title}</strong>}
+                      <p>{note.text}</p>
+                    </div>
+                  ))}
+
                   {filteredPins.map((pin) => (
                     <button
                       key={pin._id}
-                      className={
-                        pin.iconType === "custom"
-                          ? "pin customPin"
-                          : "pin emojiPin"
-                      }
+                      className={[
+                        "pin",
+                        pin.iconType === "custom" ? "customPin" : "emojiPin",
+                        (pin.category || "geral") === "system" ? "systemPin" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
                       style={{
                         left: `${pin.x}%`,
                         top: `${pin.y}%`,
+                        "--pin-bg": getPinCategoryColor(pin),
                       }}
                       onClick={(event) => handlePinClick(event, pin)}
                       title={pin.name}
                     >
-                      {renderPinIcon(pin)}
+                      <span className="pinIconContent">
+                        {renderPinIcon(pin)}
+                      </span>
                     </button>
                   ))}
 
                   {selectedPin && pinPopupPosition && (
                     <div
-                      className="pinInfoPopup mapAttachedPopup"
+                      className="mapAttachedPopup"
                       style={{
                         left: `${pinPopupPosition.x}%`,
                         top: `${pinPopupPosition.y}%`,
+                        "--popup-scale": 1 / mapScale,
                       }}
                       onMouseDown={(event) => event.stopPropagation()}
                       onMouseUp={(event) => event.stopPropagation()}
@@ -664,6 +1407,7 @@ export default function PublicMapPage() {
                       onPointerUp={(event) => event.stopPropagation()}
                       onClick={(event) => event.stopPropagation()}
                     >
+                      <div className="pinInfoPopup">
                       <button
                         className="pinPopupClose"
                         onClick={() => {
@@ -692,6 +1436,39 @@ export default function PublicMapPage() {
                         </div>
                       )}
 
+                      {Array.isArray(selectedPin.chainRequirements) &&
+                        selectedPin.chainRequirements.length > 0 && (
+                          <div className="pinPopupChain">
+                            <strong>Chain Requirements</strong>
+                            <div className="pinPopupChainBadges">
+                              {selectedPin.chainRequirements.map((requirement) => (
+                                <button
+                                  type="button"
+                                  key={getChainRequirementKey(requirement)}
+                                  className={
+                                    requirement.kind === "pin" || requirement.pinId
+                                      ? "pinPopupChainBadge pinPopupChainBadgeButton"
+                                      : "pinPopupChainBadge"
+                                  }
+                                  disabled={!(requirement.kind === "pin" || requirement.pinId)}
+                                  onClick={
+                                    requirement.kind === "pin" || requirement.pinId
+                                      ? () => selectChainRequirementPin(requirement)
+                                      : undefined
+                                  }
+                                >
+                                  {renderChainRequirementIcon(requirement)}
+                                  {requirement.typeName || requirement.label}
+                                </button>
+                              ))}
+                            </div>
+
+                            {selectedPin.chainDescription && (
+                              <p>{selectedPin.chainDescription}</p>
+                            )}
+                          </div>
+                        )}
+
                       <div className="pinPopupMeta">
                         <div>
                           <strong>{t("common.group")}:</strong>{" "}
@@ -706,6 +1483,18 @@ export default function PublicMapPage() {
                           {selectedPin.typeName || selectedPin.name}
                         </div>
                       </div>
+
+                      {isPortalPin(selectedPin) && (
+                        <div className="pinPopupActions">
+                          <button
+                            className="secondary"
+                            onClick={() => openPortalDestination(selectedPin)}
+                          >
+                            Teleport
+                          </button>
+                        </div>
+                      )}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -715,6 +1504,66 @@ export default function PublicMapPage() {
           }}
         </TransformWrapper>
       </section>
+
+      {shareModalOpen && (
+        <div className="modalOverlay" onClick={() => setShareModalOpen(false)}>
+          <div
+            className="modal smallModal shareMapModal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              className="closeButton"
+              onClick={() => setShareModalOpen(false)}
+            >
+              {"\u00D7"}
+            </button>
+
+            <h2>Share map</h2>
+            <p className="modalSubtitle">
+              O mapa precisa estar como publico ou nao-listado para que outros
+              usuarios possam visualizar.
+            </p>
+
+            <label>
+              Link
+              <input
+                readOnly
+                value={
+                  typeof window === "undefined"
+                    ? ""
+                    : `${window.location.origin}/map/${activeMapId}`
+                }
+                onFocus={(event) => event.target.select()}
+              />
+            </label>
+
+            <div className="modalActions">
+              <button className="primary" onClick={copyPublicLink}>
+                Copy link
+              </button>
+
+              <button
+                className="secondary"
+                onClick={() => setShareModalOpen(false)}
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activityStatus && (
+        <div
+          className={
+            activityStatusClosing
+              ? "mapActivityStatus mapActivityStatusClosing"
+              : "mapActivityStatus"
+          }
+        >
+          {activityStatus}
+        </div>
+      )}
 
     </main>
   );
