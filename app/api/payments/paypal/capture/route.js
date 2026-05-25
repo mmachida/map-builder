@@ -1,11 +1,25 @@
 import { getServerSession } from "next-auth";
 import clientPromise from "@/lib/mongodb";
 import { authOptions } from "@/lib/auth";
-import { capturePayPalOrder } from "@/lib/paypal";
+import { capturePayPalOrder, getPayPalOrder } from "@/lib/paypal";
 import { applyPurchasedPlan, getPaymentPlan } from "@/lib/paymentPlans";
 
 function getCaptureId(captureData) {
   return captureData?.purchase_units?.[0]?.payments?.captures?.[0]?.id || "";
+}
+
+function getCompletedCapture(paypalData) {
+  return (
+    paypalData?.purchase_units
+      ?.flatMap((unit) => unit?.payments?.captures || [])
+      ?.find((capture) => capture?.status === "COMPLETED") || null
+  );
+}
+
+function isPayPalDataPaid(paypalData) {
+  return (
+    paypalData?.status === "COMPLETED" || Boolean(getCompletedCapture(paypalData))
+  );
 }
 
 function isPayPalBusinessValidationError(error) {
@@ -16,6 +30,72 @@ function isPayPalBusinessValidationError(error) {
     message.includes("semantically incorrect") ||
     message.includes("requested action could not be performed")
   );
+}
+
+async function markPaymentPaid({ db, payments, payment, plan, paypalData }) {
+  const paidAt = new Date();
+  const completedCapture = getCompletedCapture(paypalData);
+  const lock = await payments.updateOne(
+    { _id: payment._id, status: { $nin: ["paid", "applying"] } },
+    {
+      $set: {
+        status: "applying",
+        updatedAt: paidAt,
+      },
+    }
+  );
+
+  if (lock.matchedCount === 0) return;
+
+  await applyPurchasedPlan({
+    accounts: db.collection("accounts"),
+    userId: payment.userId,
+    plan,
+    paidAt,
+  });
+
+  await payments.updateOne(
+    { _id: payment._id },
+    {
+      $set: {
+        status: "paid",
+        paypalStatus:
+          paypalData?.status || completedCapture?.status || "COMPLETED",
+        paypalCaptureId:
+          completedCapture?.id ||
+          getCaptureId(paypalData) ||
+          payment.paypalCaptureId ||
+          "",
+        captureData: paypalData,
+        paidAt,
+        updatedAt: paidAt,
+      },
+    }
+  );
+}
+
+async function getOrderAndMarkIfPaid({
+  db,
+  payments,
+  payment,
+  plan,
+  paypalOrderId,
+}) {
+  const orderData = await getPayPalOrder(paypalOrderId);
+
+  if (!isPayPalDataPaid(orderData)) {
+    return { paid: false, paypalData: orderData };
+  }
+
+  await markPaymentPaid({
+    db,
+    payments,
+    payment,
+    plan,
+    paypalData: orderData,
+  });
+
+  return { paid: true, paypalData: orderData };
 }
 
 export async function POST(request) {
@@ -86,6 +166,40 @@ export async function POST(request) {
       }
 
       if (isPayPalBusinessValidationError(error)) {
+        try {
+          const orderResult = await getOrderAndMarkIfPaid({
+            db,
+            payments,
+            payment: refreshedPayment || payment,
+            plan,
+            paypalOrderId,
+          });
+
+          if (orderResult.paid) {
+            return Response.json({
+              success: true,
+              status: "paid",
+              plan: plan.id,
+            });
+          }
+
+          await payments.updateOne(
+            { _id: payment._id },
+            {
+              $set: {
+                status: "processing",
+                paypalStatus: orderResult.paypalData?.status || "PROCESSING",
+                updatedAt: new Date(),
+              },
+            }
+          );
+        } catch (lookupError) {
+          console.error(
+            "ERRO AO CONSULTAR PEDIDO PAYPAL APOS CAPTURA AMBIGUA:",
+            lookupError
+          );
+        }
+
         return Response.json({
           success: true,
           status: "processing",
@@ -98,13 +212,38 @@ export async function POST(request) {
       throw error;
     }
 
-    if (captureData.status !== "COMPLETED") {
+    if (!isPayPalDataPaid(captureData)) {
+      try {
+        const orderResult = await getOrderAndMarkIfPaid({
+          db,
+          payments,
+          payment,
+          plan,
+          paypalOrderId,
+        });
+
+        if (orderResult.paid) {
+          return Response.json({
+            success: true,
+            status: "paid",
+            plan: plan.id,
+          });
+        }
+
+        captureData = orderResult.paypalData || captureData;
+      } catch (lookupError) {
+        console.error(
+          "ERRO AO CONSULTAR PEDIDO PAYPAL EM STATUS NAO COMPLETO:",
+          lookupError
+        );
+      }
+
       await payments.updateOne(
         { _id: payment._id },
         {
           $set: {
-            status: "failed",
-            paypalStatus: captureData.status,
+            status: "processing",
+            paypalStatus: captureData?.status || "PROCESSING",
             updatedAt: new Date(),
           },
         }
@@ -119,28 +258,13 @@ export async function POST(request) {
       });
     }
 
-    const paidAt = new Date();
-
-    await applyPurchasedPlan({
-      accounts: db.collection("accounts"),
-      userId: session.user.userId,
+    await markPaymentPaid({
+      db,
+      payments,
+      payment,
       plan,
-      paidAt,
+      paypalData: captureData,
     });
-
-    await payments.updateOne(
-      { _id: payment._id },
-      {
-        $set: {
-          status: "paid",
-          paypalStatus: captureData.status,
-          paypalCaptureId: getCaptureId(captureData),
-          captureData,
-          paidAt,
-          updatedAt: paidAt,
-        },
-      }
-    );
 
     return Response.json({
       success: true,

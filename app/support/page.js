@@ -88,13 +88,14 @@ export default function SupportPage() {
   }
 
   async function waitForPaymentConfirmation(paypalOrderId) {
-    const maxAttempts = 12;
+    const maxAttempts = 24;
 
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 1500));
 
       const response = await fetch(
-        `/api/payments?paypalOrderId=${encodeURIComponent(paypalOrderId)}`
+        `/api/payments?paypalOrderId=${encodeURIComponent(paypalOrderId)}`,
+        { cache: "no-store" }
       );
       const data = await response.json();
 

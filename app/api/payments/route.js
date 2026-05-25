@@ -42,6 +42,10 @@ export async function GET(request) {
           createdAt: payment.createdAt,
           paidAt: payment.paidAt || null,
         },
+      }, {
+        headers: {
+          "Cache-Control": "no-store",
+        },
       });
     }
 
@@ -64,6 +68,10 @@ export async function GET(request) {
         createdAt: payment.createdAt,
         paidAt: payment.paidAt || null,
       })),
+    }, {
+      headers: {
+        "Cache-Control": "no-store",
+      },
     });
   } catch (error) {
     console.error("ERRO GET /api/payments:", error);
