@@ -31,6 +31,7 @@ export default function SupportPage() {
   const [paymentModalPlan, setPaymentModalPlan] = useState(null);
   const [paymentStatus, setPaymentStatus] = useState("");
   const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentResultModal, setPaymentResultModal] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -81,6 +82,11 @@ export default function SupportPage() {
 
     if (paypalStatus === "cancelled") {
       setPaymentStatus("Pagamento cancelado.");
+      setPaymentResultModal({
+        status: "error",
+        title: "Pagamento cancelado",
+        message: "O pagamento foi cancelado antes da confirmação.",
+      });
       window.history.replaceState({}, "", "/support");
       return;
     }
@@ -92,6 +98,11 @@ export default function SupportPage() {
     async function capturePayment() {
       setPaymentLoading(true);
       setPaymentStatus("Confirmando pagamento no PayPal...");
+      setPaymentResultModal({
+        status: "loading",
+        title: "Processando pagamento",
+        message: "Aguarde enquanto confirmamos seu pagamento com o PayPal.",
+      });
 
       try {
         const response = await fetch("/api/payments/paypal/capture", {
@@ -108,11 +119,22 @@ export default function SupportPage() {
         if (!active) return;
 
         setPaymentStatus("Pagamento confirmado com sucesso.");
+        setPaymentResultModal({
+          status: "success",
+          title: "Pagamento concluído",
+          message: "Seu pagamento foi confirmado e o benefício foi aplicado à sua conta.",
+        });
         await update?.();
         window.history.replaceState({}, "", "/support");
       } catch (error) {
         if (!active) return;
-        setPaymentStatus(error.message || "Erro ao confirmar pagamento.");
+        const message = error.message || "Erro ao confirmar pagamento.";
+        setPaymentStatus(message);
+        setPaymentResultModal({
+          status: "error",
+          title: "Falha no pagamento",
+          message,
+        });
       } finally {
         if (active) {
           setPaymentLoading(false);
@@ -300,12 +322,12 @@ export default function SupportPage() {
             onMouseDown={(event) => event.stopPropagation()}
           >
             <button
-              className="modalCloseButton"
+              className="supportPaymentCloseButton"
               onClick={() => setPaymentModalPlan(null)}
               disabled={paymentLoading}
               aria-label="Fechar"
             >
-              ×
+              {"\u00D7"}
             </button>
             <h2>Payment method</h2>
             <p>
@@ -328,7 +350,34 @@ export default function SupportPage() {
         </div>
       )}
 
+      {paymentResultModal && (
+        <div className="modalOverlay supporterFeatureOverlay">
+          <div className="modal supporterFeatureModal supportPaymentModal supportPaymentResultModal">
+            {paymentResultModal.status !== "loading" && (
+              <button
+                className="supportPaymentCloseButton"
+                onClick={() => setPaymentResultModal(null)}
+                aria-label="Fechar"
+              >
+                {"\u00D7"}
+              </button>
+            )}
+
+            <div
+              className={[
+                "supportPaymentResultIcon",
+                paymentResultModal.status,
+              ].join(" ")}
+              aria-hidden="true"
+            />
+            <h2>{paymentResultModal.title}</h2>
+            <p>{paymentResultModal.message}</p>
+          </div>
+        </div>
+      )}
+
       <SiteFooter />
     </main>
   );
 }
+

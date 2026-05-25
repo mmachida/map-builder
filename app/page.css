@@ -9638,9 +9638,11 @@ button:disabled {
 }
 
 .supportPaymentModal {
+  position: relative;
   width: min(420px, calc(100vw - 32px));
   display: grid;
   gap: 14px;
+  padding-top: 28px;
 }
 
 .supportPaymentModal p {
@@ -9662,6 +9664,84 @@ button:disabled {
   border-color: rgba(245, 209, 138, 0.84);
   background: #2f281f;
   color: #fff2bf;
+}
+
+.supportPaymentCloseButton {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid rgba(185, 139, 74, 0.4);
+  border-radius: 8px;
+  background: #231f25;
+  color: #f5d18a;
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.supportPaymentCloseButton:hover:not(:disabled) {
+  border-color: rgba(245, 209, 138, 0.78);
+  background: #2f281f;
+  color: #fff2bf;
+}
+
+.supportPaymentResultModal {
+  text-align: center;
+  justify-items: center;
+}
+
+.supportPaymentResultIcon {
+  width: 38px;
+  height: 38px;
+  border: 2px solid rgba(245, 209, 138, 0.38);
+  border-top-color: #f5d18a;
+  border-radius: 50%;
+}
+
+.supportPaymentResultIcon.loading {
+  animation: spin 0.8s linear infinite;
+}
+
+.supportPaymentResultIcon.success,
+.supportPaymentResultIcon.error {
+  position: relative;
+  display: grid;
+  place-items: center;
+  animation: none;
+}
+
+.supportPaymentResultIcon.success {
+  border-color: rgba(134, 239, 172, 0.72);
+}
+
+.supportPaymentResultIcon.error {
+  border-color: rgba(248, 113, 113, 0.72);
+}
+
+.supportPaymentResultIcon.success::after {
+  content: "✓";
+  color: #86efac;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.supportPaymentResultIcon.error::after {
+  content: "!";
+  color: #f87171;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 860px) {
