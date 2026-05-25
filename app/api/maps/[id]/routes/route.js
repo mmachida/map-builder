@@ -2,6 +2,11 @@ import { ObjectId } from "mongodb";
 import { getServerSession } from "next-auth";
 import clientPromise from "@/lib/mongodb";
 import { authOptions } from "@/lib/auth";
+import { getMapAccessById } from "@/lib/mapPermissions";
+import { stripPrivateAccountFields } from "@/lib/publicData";
+
+const MAX_ROUTE_TITLE_LENGTH = 30;
+const MAX_ROUTE_DESCRIPTION_LENGTH = 250;
 
 export async function GET(request, context) {
   try {
@@ -18,7 +23,7 @@ export async function GET(request, context) {
 
     return Response.json({
       routes: routes.map((route) => ({
-        ...route,
+        ...stripPrivateAccountFields(route),
         _id: route._id.toString(),
       })),
     });
@@ -57,6 +62,23 @@ export async function POST(request, context) {
       );
     }
 
+    const routeName = body.name.trim();
+    const routeDescription = body.description?.trim() || "";
+
+    if (routeName.length > MAX_ROUTE_TITLE_LENGTH) {
+      return Response.json(
+        { error: `O titulo da rota pode ter no maximo ${MAX_ROUTE_TITLE_LENGTH} caracteres.` },
+        { status: 400 }
+      );
+    }
+
+    if (routeDescription.length > MAX_ROUTE_DESCRIPTION_LENGTH) {
+      return Response.json(
+        { error: `A descricao da rota pode ter no maximo ${MAX_ROUTE_DESCRIPTION_LENGTH} caracteres.` },
+        { status: 400 }
+      );
+    }
+
     if (!Array.isArray(body.points) || body.points.length < 2) {
       return Response.json(
         { error: "A rota precisa ter pelo menos 2 pontos." },
@@ -67,28 +89,27 @@ export async function POST(request, context) {
     const client = await clientPromise;
     const db = client.db(process.env.MONGODB_DB);
 
-    const map = await db.collection("maps").findOne({
-      _id: new ObjectId(id),
-      ownerEmail: session.user.email,
-    });
+    const { map, access } = await getMapAccessById(db, id, session);
 
-    if (!map) {
+    if (!map || !access.canEditRoutes) {
       return Response.json(
         { error: "Mapa não encontrado ou sem permissão." },
-        { status: 404 }
+        { status: 403 }
       );
     }
 
     const newRoute = {
       mapId: id,
       groupId: map.groupId || "",
+      ownerUserId: session.user.userId,
+      ownerUsername: session.user.username || "USER",
       ownerEmail: session.user.email,
-      ownerName: session.user.name,
-      name: body.name.trim(),
-      description: body.description?.trim() || "",
+      ownerName: session.user.username || "USER",
+      name: routeName,
+      description: routeDescription,
       points: body.points,
       color: body.color || "#3b82f6",
-      width: body.width || 4,
+      width: body.width || 2,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -97,7 +118,7 @@ export async function POST(request, context) {
 
     return Response.json({
       route: {
-        ...newRoute,
+        ...stripPrivateAccountFields(newRoute),
         _id: result.insertedId.toString(),
       },
     });
@@ -126,10 +147,16 @@ export async function DELETE(request, context) {
     const client = await clientPromise;
     const db = client.db(process.env.MONGODB_DB);
 
-    const result = await db.collection("routes").deleteMany({
-      mapId: id,
-      ownerEmail: session.user.email,
-    });
+    const { access } = await getMapAccessById(db, id, session);
+
+    if (!access.canEditRoutes) {
+      return Response.json(
+        { error: "Sem permissao para editar rotas." },
+        { status: 403 }
+      );
+    }
+
+    const result = await db.collection("routes").deleteMany({ mapId: id });
 
     return Response.json({
       success: true,

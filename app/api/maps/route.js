@@ -1,6 +1,15 @@
 import { getServerSession } from "next-auth";
 import clientPromise from "@/lib/mongodb";
 import { authOptions } from "@/lib/auth";
+import { getOwnerQuery } from "@/lib/ownership";
+import { stripPrivateAccountFields } from "@/lib/publicData";
+import { getAccountLimits } from "@/lib/accountLimits";
+
+const MAP_VISIBILITIES = ["public", "notListed", "private"];
+
+function normalizeMapVisibility(value) {
+  return MAP_VISIBILITIES.includes(value) ? value : "private";
+}
 
 export async function GET() {
   try {
@@ -15,12 +24,12 @@ export async function GET() {
 
     const maps = await db
       .collection("maps")
-      .find({ ownerEmail: session.user.email })
+      .find(getOwnerQuery(session))
       .sort({ createdAt: -1 })
       .toArray();
 
     const mapsFormatted = maps.map((map) => ({
-      ...map,
+      ...stripPrivateAccountFields(map),
       _id: map._id.toString(),
     }));
 
@@ -47,23 +56,43 @@ export async function POST(request) {
     }
 
     const body = await request.json();
+    const publicUsername = session.user.username || "USER";
 
     const newMap = {
       title: body.title,
+      description: String(body.description || "").trim(),
       imageUrl: body.imageUrl,
+      tileData: body.tileData || null,
+      visibility: normalizeMapVisibility(body.visibility),
+      ownerUserId: session.user.userId,
+      ownerUsername: publicUsername,
       ownerEmail: session.user.email,
-      ownerName: session.user.name,
+      ownerName: publicUsername,
       createdAt: new Date(),
     };
 
     const client = await clientPromise;
     const db = client.db(process.env.MONGODB_DB);
+    const [mapCount, account] = await Promise.all([
+      db.collection("maps").countDocuments(getOwnerQuery(session)),
+      db.collection("accounts").findOne({ user_id: session.user.userId }),
+    ]);
+    const accountLimits = getAccountLimits(account);
+
+    if (mapCount >= accountLimits.maps) {
+      return Response.json(
+        {
+          error: `Limite de mapas atingido (${mapCount}/${accountLimits.maps}).`,
+        },
+        { status: 403 }
+      );
+    }
 
     const result = await db.collection("maps").insertOne(newMap);
 
     return Response.json({
       map: {
-        ...newMap,
+        ...stripPrivateAccountFields(newMap),
         _id: result.insertedId.toString(),
       },
     });
