@@ -8,6 +8,16 @@ function getCaptureId(captureData) {
   return captureData?.purchase_units?.[0]?.payments?.captures?.[0]?.id || "";
 }
 
+function isPayPalBusinessValidationError(error) {
+  const message = String(error?.message || "").toLowerCase();
+
+  return (
+    message.includes("business validation") ||
+    message.includes("semantically incorrect") ||
+    message.includes("requested action could not be performed")
+  );
+}
+
 export async function POST(request) {
   try {
     const session = await getServerSession(authOptions);
@@ -57,7 +67,36 @@ export async function POST(request) {
       );
     }
 
-    const captureData = await capturePayPalOrder(paypalOrderId);
+    let captureData;
+
+    try {
+      captureData = await capturePayPalOrder(paypalOrderId);
+    } catch (error) {
+      const refreshedPayment = await payments.findOne({
+        paypalOrderId,
+        userId: session.user.userId,
+      });
+
+      if (refreshedPayment?.status === "paid") {
+        return Response.json({
+          success: true,
+          status: "paid",
+          plan: plan.id,
+        });
+      }
+
+      if (isPayPalBusinessValidationError(error)) {
+        return Response.json({
+          success: true,
+          status: "processing",
+          message:
+            "Pagamento em processamento. O PayPal ainda esta confirmando a compra.",
+          plan: plan.id,
+        });
+      }
+
+      throw error;
+    }
 
     if (captureData.status !== "COMPLETED") {
       await payments.updateOne(
@@ -71,10 +110,13 @@ export async function POST(request) {
         }
       );
 
-      return Response.json(
-        { error: "O pagamento nao foi concluido pelo PayPal." },
-        { status: 400 }
-      );
+      return Response.json({
+        success: true,
+        status: "processing",
+        message:
+          "Pagamento em processamento. O PayPal ainda esta confirmando a compra.",
+        plan: plan.id,
+      });
     }
 
     const paidAt = new Date();

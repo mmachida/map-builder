@@ -21,6 +21,28 @@ const PAYMENT_PLANS = {
     price: "R$2,99",
   },
 };
+const PROCESSED_PAYPAL_ORDERS_KEY = "processedPayPalOrders";
+
+function getProcessedPayPalOrders() {
+  try {
+    return JSON.parse(
+      sessionStorage.getItem(PROCESSED_PAYPAL_ORDERS_KEY) || "[]"
+    );
+  } catch {
+    return [];
+  }
+}
+
+function markPayPalOrderProcessed(paypalOrderId) {
+  const orders = getProcessedPayPalOrders();
+
+  if (!orders.includes(paypalOrderId)) {
+    sessionStorage.setItem(
+      PROCESSED_PAYPAL_ORDERS_KEY,
+      JSON.stringify([...orders, paypalOrderId].slice(-20))
+    );
+  }
+}
 
 export default function SupportPage() {
   const { data: session, status, update } = useSession();
@@ -80,6 +102,10 @@ export default function SupportPage() {
     const paypalStatus = params.get("paypalStatus");
     const paypalOrderId = params.get("token");
 
+    if (paypalStatus) {
+      window.history.replaceState({}, "", "/support");
+    }
+
     if (paypalStatus === "cancelled") {
       setPaymentStatus("Pagamento cancelado.");
       setPaymentResultModal({
@@ -87,11 +113,16 @@ export default function SupportPage() {
         title: "Pagamento cancelado",
         message: "O pagamento foi cancelado antes da confirmação.",
       });
-      window.history.replaceState({}, "", "/support");
       return;
     }
 
     if (paypalStatus !== "return" || !paypalOrderId) return;
+
+    if (getProcessedPayPalOrders().includes(paypalOrderId)) {
+      return;
+    }
+
+    markPayPalOrderProcessed(paypalOrderId);
 
     let active = true;
 
@@ -118,14 +149,25 @@ export default function SupportPage() {
 
         if (!active) return;
 
-        setPaymentStatus("Pagamento confirmado com sucesso.");
-        setPaymentResultModal({
-          status: "success",
-          title: "Pagamento concluído",
-          message: "Seu pagamento foi confirmado e o benefício foi aplicado à sua conta.",
-        });
+        if (data.status === "processing") {
+          const message =
+            data.message ||
+            "Pagamento em processamento. O PayPal ainda esta confirmando a compra.";
+          setPaymentStatus(message);
+          setPaymentResultModal({
+            status: "processing",
+            title: "Pagamento em processamento",
+            message,
+          });
+        } else {
+          setPaymentStatus("Pagamento confirmado com sucesso.");
+          setPaymentResultModal({
+            status: "success",
+            title: "Pagamento concluído",
+            message: "Seu pagamento foi confirmado e o benefício foi aplicado à sua conta.",
+          });
+        }
         await update?.();
-        window.history.replaceState({}, "", "/support");
       } catch (error) {
         if (!active) return;
         const message = error.message || "Erro ao confirmar pagamento.";
@@ -380,4 +422,5 @@ export default function SupportPage() {
     </main>
   );
 }
+
 

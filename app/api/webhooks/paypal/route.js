@@ -1,5 +1,5 @@
 import clientPromise from "@/lib/mongodb";
-import { capturePayPalOrder, verifyPayPalWebhook } from "@/lib/paypal";
+import { verifyPayPalWebhook } from "@/lib/paypal";
 import { applyPurchasedPlan, getPaymentPlan } from "@/lib/paymentPlans";
 
 function getOrderId(event) {
@@ -27,11 +27,7 @@ function getCaptureId(event) {
   return resource.id || "";
 }
 
-function getCaptureIdFromCaptureData(captureData) {
-  return captureData?.purchase_units?.[0]?.payments?.captures?.[0]?.id || "";
-}
-
-async function markPaymentPaid({ db, payment, event, captureData, now }) {
+async function markPaymentPaid({ db, payment, event, now }) {
   if (!payment || payment.status === "paid") return;
 
   const plan = getPaymentPlan(payment.plan);
@@ -51,9 +47,7 @@ async function markPaymentPaid({ db, payment, event, captureData, now }) {
       $set: {
         status: "paid",
         paypalStatus: "COMPLETED",
-        paypalCaptureId:
-          getCaptureIdFromCaptureData(captureData) || getCaptureId(event),
-        captureData: captureData || null,
+        paypalCaptureId: getCaptureId(event),
         paidAt: now,
         updatedAt: now,
       },
@@ -96,39 +90,7 @@ async function processPayPalEvent({ db, event, now }) {
       );
     }
 
-    try {
-      const captureData = await capturePayPalOrder(orderId);
-
-      if (captureData.status === "COMPLETED") {
-        const currentPayment = await payments.findOne({ _id: payment._id });
-
-        await markPaymentPaid({
-          db,
-          payment: currentPayment,
-          event,
-          captureData,
-          now,
-        });
-
-        return {
-          processed: true,
-          status: "paid",
-          capturedFromWebhook: true,
-        };
-      }
-
-      return {
-        processed: true,
-        status: "approved",
-        paypalStatus: captureData.status,
-      };
-    } catch (error) {
-      return {
-        processed: true,
-        status: "approved",
-        captureError: error.message || "Erro ao capturar pedido aprovado.",
-      };
-    }
+    return { processed: true, status: "approved" };
   }
 
   if (eventType === "PAYMENT.CAPTURE.COMPLETED") {

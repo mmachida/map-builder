@@ -9704,7 +9704,8 @@ button:disabled {
   border-radius: 50%;
 }
 
-.supportPaymentResultIcon.loading {
+.supportPaymentResultIcon.loading,
+.supportPaymentResultIcon.processing {
   animation: spin 0.8s linear infinite;
 }
 
