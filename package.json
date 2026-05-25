@@ -15,7 +15,8 @@
     "next-auth": "^4.24.14",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "react-zoom-pan-pinch": "^4.0.3"
+    "react-zoom-pan-pinch": "^4.0.3",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "eslint": "^9",
