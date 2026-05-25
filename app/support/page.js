@@ -55,6 +55,85 @@ export default function SupportPage() {
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [paymentResultModal, setPaymentResultModal] = useState(null);
 
+  async function refreshUsageAndSession() {
+    try {
+      const [mapsResponse, assetsResponse, limitsResponse] = await Promise.all([
+        fetch("/api/maps"),
+        fetch("/api/assets"),
+        fetch("/api/account/limits"),
+      ]);
+
+      const [mapsData, assetsData, limitsData] = await Promise.all([
+        mapsResponse.json(),
+        assetsResponse.json(),
+        limitsResponse.json(),
+      ]);
+
+      if (mapsResponse.ok) {
+        setMapCount((mapsData.maps || []).length);
+      }
+
+      if (assetsResponse.ok) {
+        setIconCount((assetsData.assets || []).length);
+      }
+
+      if (limitsResponse.ok && limitsData.limits) {
+        setAccountLimits(limitsData.limits);
+      }
+
+      await update?.();
+    } catch (error) {
+      console.error("Erro ao atualizar dados da compra.", error);
+    }
+  }
+
+  async function waitForPaymentConfirmation(paypalOrderId) {
+    const maxAttempts = 12;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+
+      const response = await fetch(
+        `/api/payments?paypalOrderId=${encodeURIComponent(paypalOrderId)}`
+      );
+      const data = await response.json();
+
+      if (response.ok && data.payment?.status === "paid") {
+        setPaymentStatus("Pagamento confirmado com sucesso.");
+        setPaymentResultModal({
+          status: "success",
+          title: "Pagamento concluído",
+          message:
+            "Seu pagamento foi confirmado e o benefício foi aplicado à sua conta.",
+        });
+        await refreshUsageAndSession();
+        return true;
+      }
+
+      if (response.ok && ["denied", "failed", "refunded"].includes(data.payment?.status)) {
+        const message = "O PayPal não confirmou este pagamento.";
+        setPaymentStatus(message);
+        setPaymentResultModal({
+          status: "error",
+          title: "Falha no pagamento",
+          message,
+        });
+        return true;
+      }
+    }
+
+    setPaymentStatus(
+      "Pagamento em processamento. Atualize a página em alguns instantes para conferir o status."
+    );
+    setPaymentResultModal({
+      status: "processing",
+      title: "Pagamento em processamento",
+      message:
+        "O PayPal ainda está confirmando a compra. Você pode fechar esta janela e conferir o histórico em alguns instantes.",
+    });
+    return false;
+  }
+
   useEffect(() => {
     let active = true;
 
@@ -155,10 +234,12 @@ export default function SupportPage() {
             "Pagamento em processamento. O PayPal ainda esta confirmando a compra.";
           setPaymentStatus(message);
           setPaymentResultModal({
-            status: "processing",
-            title: "Pagamento em processamento",
-            message,
+            status: "loading",
+            title: "Processando pagamento",
+            message: "Aguarde enquanto confirmamos seu pagamento com o PayPal.",
           });
+
+          await waitForPaymentConfirmation(paypalOrderId);
         } else {
           setPaymentStatus("Pagamento confirmado com sucesso.");
           setPaymentResultModal({
@@ -166,8 +247,8 @@ export default function SupportPage() {
             title: "Pagamento concluído",
             message: "Seu pagamento foi confirmado e o benefício foi aplicado à sua conta.",
           });
+          await refreshUsageAndSession();
         }
-        await update?.();
       } catch (error) {
         if (!active) return;
         const message = error.message || "Erro ao confirmar pagamento.";
@@ -422,5 +503,6 @@ export default function SupportPage() {
     </main>
   );
 }
+
 
 

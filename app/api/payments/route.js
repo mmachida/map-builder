@@ -2,7 +2,7 @@ import { getServerSession } from "next-auth";
 import clientPromise from "@/lib/mongodb";
 import { authOptions } from "@/lib/auth";
 
-export async function GET() {
+export async function GET(request) {
   try {
     const session = await getServerSession(authOptions);
 
@@ -10,8 +10,41 @@ export async function GET() {
       return Response.json({ payments: [] });
     }
 
+    const requestUrl = new URL(request.url);
+    const paypalOrderId = String(
+      requestUrl.searchParams.get("paypalOrderId") || ""
+    );
     const client = await clientPromise;
     const db = client.db(process.env.MONGODB_DB);
+
+    if (paypalOrderId) {
+      const payment = await db.collection("payments").findOne({
+        userId: session.user.userId,
+        paypalOrderId,
+      });
+
+      if (!payment) {
+        return Response.json(
+          { error: "Pagamento nao encontrado." },
+          { status: 404 }
+        );
+      }
+
+      return Response.json({
+        payment: {
+          _id: payment._id.toString(),
+          provider: payment.provider,
+          plan: payment.plan,
+          planLabel: payment.planLabel,
+          amount: payment.amount,
+          currency: payment.currency,
+          status: payment.status,
+          createdAt: payment.createdAt,
+          paidAt: payment.paidAt || null,
+        },
+      });
+    }
+
     const payments = await db
       .collection("payments")
       .find({ userId: session.user.userId })
