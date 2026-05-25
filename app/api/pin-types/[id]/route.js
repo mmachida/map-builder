@@ -2,6 +2,19 @@ import { ObjectId } from "mongodb";
 import { getServerSession } from "next-auth";
 import clientPromise from "@/lib/mongodb";
 import { authOptions } from "@/lib/auth";
+import { getMapAccessForGroup } from "@/lib/mapPermissions";
+import { PORTAL_PIN_TYPE } from "@/lib/pinCategories";
+import { DEFAULT_PIN_ICON_URL } from "@/lib/constants/icons";
+
+const MAX_CATEGORY_NAME_LENGTH = 15;
+
+function sanitizePinBackgroundColor(value, fallback = "#0f1014") {
+  const color = String(value || "").trim();
+
+  return /^#[0-9a-fA-F]{6}$/.test(color)
+    ? color.toLowerCase()
+    : fallback;
+}
 
 export async function PATCH(request, context) {
   try {
@@ -33,7 +46,6 @@ export async function PATCH(request, context) {
 
     const pinType = await db.collection("pinTypes").findOne({
       _id: new ObjectId(id),
-      ownerEmail: session.user.email,
     });
 
     if (!pinType) {
@@ -43,29 +55,54 @@ export async function PATCH(request, context) {
       );
     }
 
-    const newTypeName = body.typeName.trim();
+    const groupAccess = await getMapAccessForGroup(db, pinType.groupId, session);
+
+    if (!groupAccess.canManagePinGroups) {
+      return Response.json(
+        { error: "Sem permissao para gerenciar categorias." },
+        { status: 403 }
+      );
+    }
+
+    const isSystemPortal = pinType.systemType === PORTAL_PIN_TYPE.systemType;
+    const newTypeName = isSystemPortal
+      ? PORTAL_PIN_TYPE.typeName
+      : body.typeName.trim();
+
+    if (!isSystemPortal && newTypeName.length > MAX_CATEGORY_NAME_LENGTH) {
+      return Response.json(
+        { error: `A categoria pode ter no maximo ${MAX_CATEGORY_NAME_LENGTH} caracteres.` },
+        { status: 400 }
+      );
+    }
 
     const newCategory =
+      isSystemPortal
+        ? PORTAL_PIN_TYPE.category
+        :
       typeof body.category === "string" && body.category.trim()
         ? body.category.trim()
         : pinType.category || "geral";
 
-    const newIconType = body.iconType || pinType.iconType || "emoji";
+    const newIconType = body.iconType || pinType.iconType || "custom";
     const newIcon = newIconType === "custom" ? "" : body.icon || pinType.icon || "📍";
     const newIconImageUrl =
       newIconType === "custom"
-        ? body.iconImageUrl || pinType.iconImageUrl || ""
+        ? body.iconImageUrl || pinType.iconImageUrl || DEFAULT_PIN_ICON_URL
         : "";
 
     const newIconKey =
       newIconType === "custom"
         ? `custom:${newIconImageUrl}`
         : `emoji:${newIcon}`;
+    const newBackgroundColor =
+      body.backgroundColor !== undefined
+        ? sanitizePinBackgroundColor(body.backgroundColor, pinType.backgroundColor || "#0f1014")
+        : pinType.backgroundColor || "#0f1014";
 
     await db.collection("pinTypes").updateOne(
       {
         _id: new ObjectId(id),
-        ownerEmail: session.user.email,
       },
       {
         $set: {
@@ -75,6 +112,9 @@ export async function PATCH(request, context) {
           iconType: newIconType,
           iconImageUrl: newIconImageUrl,
           iconKey: newIconKey,
+          backgroundColor: newBackgroundColor,
+          systemType: pinType.systemType || null,
+          systemLocked: !!pinType.systemLocked,
           updatedAt: new Date(),
         },
       }
@@ -83,7 +123,6 @@ export async function PATCH(request, context) {
     await db.collection("pins").updateMany(
       {
         groupId: pinType.groupId,
-        ownerEmail: session.user.email,
         $or: [
           { iconKey: pinType.iconKey },
           {
@@ -116,6 +155,9 @@ export async function PATCH(request, context) {
         iconType: newIconType,
         iconImageUrl: newIconImageUrl,
         iconKey: newIconKey,
+        backgroundColor: newBackgroundColor,
+        systemType: pinType.systemType || null,
+        systemLocked: !!pinType.systemLocked,
         updatedAt: new Date(),
       },
     });
@@ -150,7 +192,6 @@ export async function DELETE(request, context) {
 
     const pinType = await db.collection("pinTypes").findOne({
       _id: new ObjectId(id),
-      ownerEmail: session.user.email,
     });
 
     if (!pinType) {
@@ -160,9 +201,57 @@ export async function DELETE(request, context) {
       );
     }
 
+    const groupAccess = await getMapAccessForGroup(db, pinType.groupId, session);
+
+    if (!groupAccess.canManagePinGroups) {
+      return Response.json(
+        { error: "Sem permissao para gerenciar categorias." },
+        { status: 403 }
+      );
+    }
+
+    if (pinType.systemType === PORTAL_PIN_TYPE.systemType) {
+      return Response.json(
+        { error: "A categoria Portal nao pode ser deletada." },
+        { status: 400 }
+      );
+    }
+
+    await db.collection("pins").updateMany(
+      {
+        groupId: pinType.groupId,
+        chainRequirements: {
+          $elemMatch: {
+            $or: [
+              { iconKey: pinType.iconKey },
+              {
+                category: pinType.category || "geral",
+                typeName: pinType.typeName,
+              },
+            ],
+          },
+        },
+      },
+      {
+        $pull: {
+          chainRequirements: {
+            $or: [
+              { iconKey: pinType.iconKey },
+              {
+                category: pinType.category || "geral",
+                typeName: pinType.typeName,
+              },
+            ],
+          },
+        },
+        $set: {
+          updatedAt: new Date(),
+        },
+      }
+    );
+
     const deletedPins = await db.collection("pins").deleteMany({
       groupId: pinType.groupId,
-      ownerEmail: session.user.email,
       $or: [
         { iconKey: pinType.iconKey },
         {
@@ -175,7 +264,6 @@ export async function DELETE(request, context) {
 
     const deletedPinType = await db.collection("pinTypes").deleteOne({
       _id: new ObjectId(id),
-      ownerEmail: session.user.email,
     });
 
     return Response.json({

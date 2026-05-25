@@ -2,6 +2,10 @@ import { ObjectId } from "mongodb";
 import { getServerSession } from "next-auth";
 import clientPromise from "@/lib/mongodb";
 import { authOptions } from "@/lib/auth";
+import { getMapAccessForGroup } from "@/lib/mapPermissions";
+import { SYSTEM_PIN_CATEGORY } from "@/lib/pinCategories";
+
+const MAX_GROUP_NAME_LENGTH = 15;
 
 function slugify(text) {
   return text
@@ -35,13 +39,31 @@ export async function PATCH(request, context) {
 
     const category = await db.collection("pinCategories").findOne({
       _id: new ObjectId(id),
-      ownerEmail: session.user.email,
     });
 
     if (!category) {
       return Response.json(
         { error: "Categoria não encontrada." },
         { status: 404 }
+      );
+    }
+
+    const groupAccess = await getMapAccessForGroup(db, category.groupId, session);
+
+    if (!groupAccess.canManagePinGroups) {
+      return Response.json(
+        { error: "Sem permissao para gerenciar categorias." },
+        { status: 403 }
+      );
+    }
+
+    if (
+      category.value === SYSTEM_PIN_CATEGORY.value &&
+      body.label !== undefined
+    ) {
+      return Response.json(
+        { error: "O grupo System nao pode ser alterado." },
+        { status: 400 }
       );
     }
 
@@ -59,12 +81,19 @@ export async function PATCH(request, context) {
       }
 
       const newLabel = body.label.trim();
+
+      if (newLabel.length > MAX_GROUP_NAME_LENGTH) {
+        return Response.json(
+          { error: `O grupo pode ter no maximo ${MAX_GROUP_NAME_LENGTH} caracteres.` },
+          { status: 400 }
+        );
+      }
+
       const newValue = slugify(newLabel);
 
       const duplicate = await db.collection("pinCategories").findOne({
         _id: { $ne: new ObjectId(id) },
         groupId: category.groupId,
-        ownerEmail: session.user.email,
         value: newValue,
       });
 
@@ -82,7 +111,6 @@ export async function PATCH(request, context) {
       await db.collection("pins").updateMany(
         {
           groupId: category.groupId,
-          ownerEmail: session.user.email,
           category: category.value,
         },
         {
@@ -97,7 +125,6 @@ export async function PATCH(request, context) {
       await db.collection("pinTypes").updateMany(
         {
           groupId: category.groupId,
-          ownerEmail: session.user.email,
           category: category.value,
         },
         {
@@ -117,7 +144,6 @@ export async function PATCH(request, context) {
     await db.collection("pinCategories").updateOne(
       {
         _id: new ObjectId(id),
-        ownerEmail: session.user.email,
       },
       {
         $set: updateData,
@@ -162,7 +188,6 @@ export async function DELETE(request, context) {
 
     const category = await db.collection("pinCategories").findOne({
       _id: new ObjectId(id),
-      ownerEmail: session.user.email,
     });
 
     if (!category) {
@@ -172,28 +197,62 @@ export async function DELETE(request, context) {
       );
     }
 
-    if (category.value === "geral") {
+    const groupAccess = await getMapAccessForGroup(db, category.groupId, session);
+
+    if (!groupAccess.canManagePinGroups) {
       return Response.json(
-        { error: "A categoria Geral não pode ser deletada." },
+        { error: "Sem permissao para gerenciar categorias." },
+        { status: 403 }
+      );
+    }
+
+    if (category.value === SYSTEM_PIN_CATEGORY.value) {
+      return Response.json(
+        { error: "O grupo System nao pode ser deletado." },
         { status: 400 }
       );
     }
 
+    const categoriesCount = await db.collection("pinCategories").countDocuments({
+      groupId: category.groupId,
+    });
+
+    if (categoriesCount <= 1) {
+      return Response.json(
+        { error: "O mapa precisa ter pelo menos um grupo de pins." },
+        { status: 400 }
+      );
+    }
+
+    await db.collection("pins").updateMany(
+      {
+        groupId: category.groupId,
+        "chainRequirements.category": category.value,
+      },
+      {
+        $pull: {
+          chainRequirements: {
+            category: category.value,
+          },
+        },
+        $set: {
+          updatedAt: new Date(),
+        },
+      }
+    );
+
     const deletedPins = await db.collection("pins").deleteMany({
       groupId: category.groupId,
-      ownerEmail: session.user.email,
       category: category.value,
     });
 
     const deletedPinTypes = await db.collection("pinTypes").deleteMany({
       groupId: category.groupId,
-      ownerEmail: session.user.email,
       category: category.value,
     });
 
     const deletedCategory = await db.collection("pinCategories").deleteOne({
       _id: new ObjectId(id),
-      ownerEmail: session.user.email,
     });
 
     return Response.json({
