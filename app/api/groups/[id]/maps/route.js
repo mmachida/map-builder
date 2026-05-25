@@ -2,6 +2,16 @@ import { ObjectId } from "mongodb";
 import { getServerSession } from "next-auth";
 import clientPromise from "@/lib/mongodb";
 import { authOptions } from "@/lib/auth";
+import { getOwnerQuery } from "@/lib/ownership";
+import { stripPrivateAccountFields } from "@/lib/publicData";
+import { ensureDefaultPinCategory } from "@/lib/pinCategories";
+import { getAccountLimits } from "@/lib/accountLimits";
+
+const MAP_VISIBILITIES = ["public", "notListed", "private"];
+
+function normalizeMapVisibility(value) {
+  return MAP_VISIBILITIES.includes(value) ? value : "private";
+}
 
 export async function GET(request, context) {
   try {
@@ -21,7 +31,7 @@ export async function GET(request, context) {
 
     const group = await db.collection("groups").findOne({
       _id: new ObjectId(id),
-      ownerEmail: session.user.email,
+      ...getOwnerQuery(session),
     });
 
     if (!group) {
@@ -35,14 +45,14 @@ export async function GET(request, context) {
       .collection("maps")
       .find({
         groupId: id,
-        ownerEmail: session.user.email,
+        ...getOwnerQuery(session),
       })
       .sort({ createdAt: -1 })
       .toArray();
 
     return Response.json({
       maps: maps.map((map) => ({
-        ...map,
+        ...stripPrivateAccountFields(map),
         _id: map._id.toString(),
       })),
     });
@@ -79,7 +89,7 @@ export async function POST(request, context) {
 
     const group = await db.collection("groups").findOne({
       _id: new ObjectId(id),
-      ownerEmail: session.user.email,
+      ...getOwnerQuery(session),
     });
 
     if (!group) {
@@ -89,20 +99,42 @@ export async function POST(request, context) {
       );
     }
 
+    const [mapCount, account] = await Promise.all([
+      db.collection("maps").countDocuments(getOwnerQuery(session)),
+      db.collection("accounts").findOne({ user_id: session.user.userId }),
+    ]);
+    const accountLimits = getAccountLimits(account);
+
+    if (mapCount >= accountLimits.maps) {
+      return Response.json(
+        {
+          error: `Limite de mapas atingido (${mapCount}/${accountLimits.maps}).`,
+        },
+        { status: 403 }
+      );
+    }
+
     const newMap = {
       groupId: id,
       title: body.title,
+      description: String(body.description || "").trim(),
       imageUrl: body.imageUrl,
+      tileData: body.tileData || null,
+      visibility: normalizeMapVisibility(body.visibility),
+      ownerUserId: session.user.userId,
+      ownerUsername: session.user.username || "USER",
       ownerEmail: session.user.email,
-      ownerName: session.user.name,
+      ownerName: session.user.username || "USER",
       createdAt: new Date(),
     };
 
     const result = await db.collection("maps").insertOne(newMap);
 
+    await ensureDefaultPinCategory(db, id, session);
+
     return Response.json({
       map: {
-        ...newMap,
+        ...stripPrivateAccountFields(newMap),
         _id: result.insertedId.toString(),
       },
     });

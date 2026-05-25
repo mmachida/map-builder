@@ -2,6 +2,9 @@ import { ObjectId } from "mongodb";
 import { getServerSession } from "next-auth";
 import clientPromise from "@/lib/mongodb";
 import { authOptions } from "@/lib/auth";
+import { ensureDefaultPinCategory } from "@/lib/pinCategories";
+
+const MAX_GROUP_NAME_LENGTH = 15;
 
 function slugify(text) {
   return text
@@ -17,22 +20,20 @@ export async function GET(request, context) {
     const { id } = await context.params;
     const session = await getServerSession(authOptions);
 
-    if (!session) {
-      return Response.json({ categories: [] });
-    }
-
     if (!ObjectId.isValid(id)) {
       return Response.json({ error: "ID inválido." }, { status: 400 });
     }
 
     const client = await clientPromise;
     const db = client.db(process.env.MONGODB_DB);
+    if (session) {
+      await ensureDefaultPinCategory(db, id, session);
+    }
 
     const categories = await db
       .collection("pinCategories")
       .find({
         groupId: id,
-        ownerEmail: session.user.email,
       })
       .sort({ sortOrder: 1, createdAt: 1 })
       .toArray();
@@ -46,24 +47,8 @@ export async function GET(request, context) {
           : index + 1,
     }));
 
-    const hasGeral = formatted.some((category) => category.value === "geral");
-
-    const categoriesWithDefault = hasGeral
-      ? formatted
-      : [
-          {
-            _id: "default-geral",
-            groupId: id,
-            value: "geral",
-            label: "Geral",
-            isDefault: true,
-            sortOrder: 0,
-          },
-          ...formatted,
-        ];
-
     return Response.json({
-      categories: categoriesWithDefault,
+      categories: formatted,
     });
   } catch (error) {
     console.error("ERRO GET PIN CATEGORIES:", error);
@@ -101,14 +86,29 @@ export async function POST(request, context) {
     }
 
     const label = body.label.trim();
+
+    if (label.length > MAX_GROUP_NAME_LENGTH) {
+      return Response.json(
+        { error: `O grupo pode ter no maximo ${MAX_GROUP_NAME_LENGTH} caracteres.` },
+        { status: 400 }
+      );
+    }
+
     const value = slugify(label);
 
     const client = await clientPromise;
     const db = client.db(process.env.MONGODB_DB);
+    const groupAccess = await getMapAccessForGroup(db, id, session);
+
+    if (!groupAccess.canManagePinGroups) {
+      return Response.json(
+        { error: "Sem permissao para gerenciar categorias." },
+        { status: 403 }
+      );
+    }
 
     const existing = await db.collection("pinCategories").findOne({
       groupId: id,
-      ownerEmail: session.user.email,
       value,
     });
 
@@ -123,7 +123,6 @@ export async function POST(request, context) {
       .collection("pinCategories")
       .find({
         groupId: id,
-        ownerEmail: session.user.email,
       })
       .sort({ sortOrder: -1, createdAt: -1 })
       .limit(1)
@@ -140,7 +139,9 @@ export async function POST(request, context) {
     const newCategory = {
       groupId: id,
       ownerEmail: session.user.email,
-      ownerName: session.user.name,
+      ownerUserId: session.user.userId,
+      ownerUsername: session.user.username || "USER",
+      ownerName: session.user.username || "USER",
       value,
       label,
       sortOrder,

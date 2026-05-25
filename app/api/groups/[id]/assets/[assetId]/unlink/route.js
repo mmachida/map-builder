@@ -2,6 +2,8 @@ import { ObjectId } from "mongodb";
 import { getServerSession } from "next-auth";
 import clientPromise from "@/lib/mongodb";
 import { authOptions } from "@/lib/auth";
+import { replaceCustomAssetIconReferences } from "@/lib/pinIconFallback";
+import { getOwnerQuery } from "@/lib/ownership";
 
 export async function PATCH(request, context) {
   try {
@@ -10,13 +12,13 @@ export async function PATCH(request, context) {
 
     if (!session) {
       return Response.json(
-        { error: "Você precisa estar logado." },
+        { error: "Voce precisa estar logado." },
         { status: 401 }
       );
     }
 
     if (!ObjectId.isValid(id) || !ObjectId.isValid(assetId)) {
-      return Response.json({ error: "ID inválido." }, { status: 400 });
+      return Response.json({ error: "ID invalido." }, { status: 400 });
     }
 
     const client = await clientPromise;
@@ -24,12 +26,12 @@ export async function PATCH(request, context) {
 
     const asset = await db.collection("assets").findOne({
       _id: new ObjectId(assetId),
-      ownerEmail: session.user.email,
+      ...getOwnerQuery(session),
     });
 
     if (!asset) {
       return Response.json(
-        { error: "Ícone não encontrado." },
+        { error: "Icone nao encontrado." },
         { status: 404 }
       );
     }
@@ -37,7 +39,7 @@ export async function PATCH(request, context) {
     await db.collection("assets").updateOne(
       {
         _id: new ObjectId(assetId),
-        ownerEmail: session.user.email,
+        ...getOwnerQuery(session),
       },
       {
         $pull: {
@@ -46,29 +48,20 @@ export async function PATCH(request, context) {
       }
     );
 
-    await db.collection("pins").updateMany(
-      {
-        ownerEmail: session.user.email,
-        groupId: id,
-        iconType: "custom",
-        iconImageUrl: asset.imageUrl,
-      },
-      {
-        $set: {
-          iconType: "emoji",
-          icon: "📍",
-          iconImageUrl: "",
-          updatedAt: new Date(),
-        },
-      }
-    );
+    await replaceCustomAssetIconReferences({
+      db,
+      ownerEmail: session.user.email,
+      imageUrl: asset.imageUrl,
+      groupId: id,
+      deletePins: true,
+    });
 
     return Response.json({ success: true });
   } catch (error) {
     console.error("ERRO UNLINK ASSET:", error);
 
     return Response.json(
-      { error: "Erro ao desvincular ícone." },
+      { error: "Erro ao desvincular icone." },
       { status: 500 }
     );
   }

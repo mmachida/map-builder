@@ -2,6 +2,7 @@ import { ObjectId } from "mongodb";
 import { getServerSession } from "next-auth";
 import clientPromise from "@/lib/mongodb";
 import { authOptions } from "@/lib/auth";
+import { getOwnerQuery } from "@/lib/ownership";
 
 export async function GET(request, context) {
   try {
@@ -21,7 +22,7 @@ export async function GET(request, context) {
 
     const group = await db.collection("groups").findOne({
       _id: new ObjectId(id),
-      ownerEmail: session.user.email,
+      ...getOwnerQuery(session),
     });
 
     if (!group) {
@@ -31,7 +32,7 @@ export async function GET(request, context) {
     const assets = await db
       .collection("assets")
       .find({
-        ownerEmail: session.user.email,
+        ...getOwnerQuery(session),
         linkedGroupIds: id,
       })
       .sort({ createdAt: -1 })

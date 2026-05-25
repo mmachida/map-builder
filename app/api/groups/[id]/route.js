@@ -2,6 +2,8 @@ import { ObjectId } from "mongodb";
 import { getServerSession } from "next-auth";
 import clientPromise from "@/lib/mongodb";
 import { authOptions } from "@/lib/auth";
+import { deleteMapStorage } from "@/lib/r2Storage";
+import { getOwnerQuery } from "@/lib/ownership";
 
 export async function PATCH(request, context) {
   try {
@@ -34,7 +36,7 @@ export async function PATCH(request, context) {
     await db.collection("groups").updateOne(
       {
         _id: new ObjectId(id),
-        ownerEmail: session.user.email,
+        ...getOwnerQuery(session),
       },
       {
         $set: {
@@ -76,7 +78,7 @@ export async function DELETE(request, context) {
 
     const group = await db.collection("groups").findOne({
       _id: new ObjectId(id),
-      ownerEmail: session.user.email,
+      ...getOwnerQuery(session),
     });
 
     if (!group) {
@@ -90,30 +92,32 @@ export async function DELETE(request, context) {
       .collection("maps")
       .find({
         groupId: id,
-        ownerEmail: session.user.email,
+        ...getOwnerQuery(session),
       })
       .toArray();
 
     const mapIds = maps.map((map) => map._id.toString());
 
+    await Promise.all(maps.map((map) => deleteMapStorage(map)));
+
     await db.collection("pins").deleteMany({
       mapId: { $in: mapIds },
-      ownerEmail: session.user.email,
+      ...getOwnerQuery(session),
     });
 	
 	await db.collection("routes").deleteMany({
 	  mapId: { $in: mapIds },
-	  ownerEmail: session.user.email,
+	  ...getOwnerQuery(session),
 	});
 
     await db.collection("maps").deleteMany({
       groupId: id,
-      ownerEmail: session.user.email,
+      ...getOwnerQuery(session),
     });
 
     await db.collection("assets").updateMany(
       {
-        ownerEmail: session.user.email,
+        ...getOwnerQuery(session),
         linkedGroupIds: id,
       },
       {
@@ -125,7 +129,7 @@ export async function DELETE(request, context) {
 
     await db.collection("groups").deleteOne({
       _id: new ObjectId(id),
-      ownerEmail: session.user.email,
+      ...getOwnerQuery(session),
     });
 
     return Response.json({ success: true });
